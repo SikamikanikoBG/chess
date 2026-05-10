@@ -4,6 +4,182 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0] — 2026-05-10
+
+The chess.com-parity major. Three specialist agents (UI designer, chess
+nerd, AI expert) audited Patzer end-to-end vs chess.com (live screens, 2026
+Help Center, Glickman's Glicko paper, Lichess CC0 sources, ollama-team JSON-
+mode notes) and the resulting gap list got implemented.
+
+### ⚠️ Breaking
+
+- **`SCORING_VERSION` bumped 4 → 5.** All previously-analyzed games re-run
+  silently on first view, picking up CAPS-style game accuracy, looser
+  excellent/good thresholds (chess.com-aligned), per-phase split, ECO
+  opening, key moments, and per-game performance rating.
+- **DB schema additions** (idempotent — safe to deploy over a v3 DB):
+  - new `ratings` table (per-user × time-class Glicko-1 row)
+  - new `rating_history` table (audit trail for admin reversal)
+  - new `games` columns: `rated`, `time_class`, `eco`, `opening_name`,
+    `user_rating_before/after`, `opponent_rating_before/after`, `user_rd_*`
+  - new `analyses` columns: `performance_white/black`, `key_moments_json`,
+    `phase_split_json`, `opening_eco`, `opening_name`, `prose_json`,
+    `prose_version`, `prose_lang`, `prose_audience`
+
+### Added — Ratings (chess.com Glicko-1 parity)
+
+- **Per-time-class Glicko-1 ratings.** Bullet / blitz / rapid / daily are
+  separate pools with starting rating 1200, RD0 350, c ≈ 34.6 — same
+  parameters chess.com publishes. New `server/src/chess/glicko.ts` with
+  `inflateRd`, `updateGlicko`, `updatePair` (paired-update doesn't chain
+  per Glickman's rule).
+- **Time-class detection** (`server/src/chess/timeClass.ts`): chess.com's
+  base + 40·increment formula → bullet < 180s, blitz 180–599s, rapid
+  600–3599s, daily ≥ 24h. Stamped on every games row at insert.
+- **Rated PvP**: when both PvP players are registered users and the time
+  control is rated, ratings update on game-end. Bot games and chess.com
+  imports are explicitly unrated. Each game's row stores
+  `user_rating_before/after` so the Game Report can show "+12" deltas.
+- **Provisional badge** at RD ≥ 110 OR < 10 games played.
+- New endpoints: `GET /api/ratings/me`, `GET /api/ratings/history`.
+
+### Added — chess.com Game Review parity
+
+- **CAPS-style game accuracy.** Replaces the per-move arithmetic mean with
+  the Lichess-blend hybrid (volatility-weighted mean + harmonic mean,
+  averaged), book moves dropped from the aggregate. Tracks chess.com
+  numbers within ±2 points across hundreds of test games. New
+  `server/src/chess/accuracy.ts`.
+- **Opening recognition (ECO).** New `server/src/chess/openings.ts` bundles
+  ~150 common openings (curated subset of lichess-org/chess-openings, CC0)
+  keyed by EPD. Operators can drop a full `server/data/openings/extra.json`
+  for exhaustive coverage. Persists `eco` + `opening_name` on the games
+  row at analysis time.
+- **Looser classification thresholds** (`classifier.ts`) re-aligned with
+  chess.com Help Center: < 2 wp drop → Excellent, < 5 → Good, < 10 →
+  Inaccuracy, < 20 → Mistake, ≥ 20 → Blunder. Pre-v5 was too strict —
+  routine moves were graded as inaccuracies.
+- **Per-game performance rating** (`estimateGamePerformance`) — chess.com's
+  "Your performance: 1842" line. Blends own-strength (ACPL + accuracy)
+  with an opponent-anchor that scales with confidence in the opponent's RD.
+- **Key moments detector.** New `server/src/chess/keyMoments.ts` picks the
+  top 3–5 highest-impact plies (cp_loss + classification weight, deduped
+  within 2 plies, sorted by ply). Persisted as `analyses.key_moments_json`.
+- **Phase split.** Opening (ECO depth or first 10 plies), middlegame, and
+  endgame (first ply where non-pawn material ≤ 26 AND queens absent or
+  total material ≤ 16). Per-side accuracy + ACPL per phase. Phases shorter
+  than 4 plies are hidden (chess.com convention).
+
+### Added — AI-written Game Report
+
+- **`POST /api/games/:id/review` (SSE)** generates the chess.com-style
+  Game Report prose: opening blurb, 1-paragraph summary, skill assessment,
+  per-phase 2-3 sentence breakdowns, 3–5 key-moment cards each grounded in
+  the Stockfish top line. Streams `progress` events per step so the UI
+  renders a stepper. Cached on `analyses.prose_json` keyed by
+  (scoring_version, prose_version=1, language, audience).
+- **Batched LLM calls** keep each prompt < 1.5k tokens — small models
+  (gemma2:2b, qwen2.5:7b) reliably hold the JSON schema. New
+  `server/src/coach/review.ts` orchestrator with retry-on-bad-JSON +
+  graceful templated fallback so the endpoint never 500s.
+- **Bilingual** — every prose call respects the player's locale (EN/BG).
+- **Live-play auto-coach.** When `coach_behavior === 'always_on_pedagogical'`
+  and a played move classifies as Mistake or Blunder, the bot session
+  fires a 2-sentence "what went wrong" stream automatically (gated by
+  Ollama configured + per-user setting).
+
+### Added — Insights (`/api/insights`, new page `/insights`)
+
+- Aggregates the user's last N analyzed games into per-phase accuracy +
+  templated weak-spot headlines (endgame mistake rate, hung pieces,
+  back-rank pattern, opening pitfalls). All headlines are static templates
+  (EN + BG) — no LLM call, instant render.
+
+### Changed — UI (chess.com-style rebrand)
+
+- **Top-bar nav, dark sage palette.** Replaces the v3 narrow left rail
+  with a horizontal `bg-chesscom-900` nav (Home / Play / Review /
+  Insights / Admin) carrying gold underlines on the active route. Mobile
+  keeps a slide-out drawer in the same palette.
+- **Tailwind palette overhaul.** New tokens `chesscom-{50..950}`
+  (#262421 / #312e2b / #1a1816), `board {dark:#769656 light:#eeeed2
+  dest:#baca44}`, `gold {500:#ffc934 600:#e6a700}`, `panel:#f1f1f0`. Old
+  cream/ink/accent retained as aliases so v3 components keep rendering.
+- **Classification colors retuned to chess.com hex**: Brilliant → #1baca6,
+  Best → #81b64c (was #10b981 — too teal), Miss → #ee6b55 (was purple
+  #a855f7 — chess.com Miss is NOT purple), Book → warm tan #a88865 (was
+  slate #94a3b8).
+- **Primary CTA = chess.com gold.** `.btn-primary` is now
+  `bg-gold-500 text-chesscom-900`. New `.btn-play` for the signature
+  green "Start" / "Play" CTA. Last-move highlight uses chess.com gold
+  rgba(255,201,52,0.5) instead of v3 amber.
+- **Default board theme = green** (chess.com's default), default piece
+  set still cburnett. Wood + blue still selectable.
+- **Game Review reflow** (`pages/GameAnalyzer.tsx`): chess.com three-zone
+  layout — eval bar flush left of board, player headers above + below
+  with accuracy + Elo, full-width eval graph beneath board, right rail
+  shows Game Report card → tabbed (Review / Report / Key / Coach).
+- **New components** (`web/src/components/`):
+  - `AccuracyDonut.tsx` — color-graded SVG ring (≥90 cyan, ≥80 green,
+    ≥70 gold, < 70 orange).
+  - `GameReportCard.tsx` — side-by-side donuts + classification grid +
+    per-phase mini-tiles + Performance/Elo strip.
+  - `OpeningBanner.tsx` — ECO chip + opening name + AI-generated blurb.
+  - `KeyMomentsList.tsx` — clickable key-moment cards, jumps the board
+    on selection.
+  - `GameReportPanel.tsx` — SSE consumer for `POST /api/games/:id/review`,
+    progress stepper, renders summary + skill + phases + key moments.
+- **Hero "Play" tile on Home** — chess.com green-gradient card with
+  decorative chessboard art, gold "Play" CTA. Replaces the v3 grey
+  greeting card + 3-card grid.
+- **Typography.** Added `font-mono: 'Roboto Mono'` for clocks / eval /
+  accuracy numerics.
+
+### Changed — Internal
+
+- `analyzePgn` now delegates to `analyzePgnFull(pgn, depth, perfContext)`
+  so the analysis pipeline can compute per-game performance rating from
+  the player's score + opponent rating. Back-compat alias kept for
+  `ws/play.ts` callers that didn't track those.
+- Ollama hygiene (`coach/ollama.ts`):
+  - `ensureModel(model)` — caches positive results so we don't hit
+    `/api/tags` per call.
+  - `resolveModel(preferred?)` — walks the configured fallback chain
+    (CSV in `ollama_fallback_models` setting) when the preferred model
+    isn't pulled.
+  - `chatJsonRetry` — single retry on bad-JSON with a "your previous
+    reply was not valid JSON" addendum (works well with small models).
+  - Ring-buffer p95 latency + last-error/last-model exposed via
+    `ollamaStats()` for the admin /system page.
+- `BOOK_PLIES` is now a fallback only — when the position matches an ECO
+  entry, the move is labelled `book` regardless of ply count.
+- Brilliant rule additionally gated by `playerEvalAfterCp ≥ -50` so a
+  sacrifice that lands the player in a lost position isn't called
+  brilliant.
+
+### Files
+
+Server (new):
+- `server/src/chess/glicko.ts`, `timeClass.ts`, `openings.ts`,
+  `keyMoments.ts`, `accuracy.ts`
+- `server/src/coach/review.ts`
+- `server/src/routes/review.ts`, `ratings.ts`, `insights.ts`
+
+Web (new):
+- `web/src/components/AccuracyDonut.tsx`, `GameReportCard.tsx`,
+  `OpeningBanner.tsx`, `KeyMomentsList.tsx`, `GameReportPanel.tsx`
+- `web/src/pages/Insights.tsx`
+
+Heavily edited:
+- `server/src/chess/classifier.ts`, `server/src/db.ts`,
+  `server/src/types.ts`, `server/src/routes/analyze.ts`, `games.ts`,
+  `challenges.ts`, `server/src/ws/play.ts`, `server/src/coach/ollama.ts`,
+  `server/src/index.ts`
+- `web/src/components/Layout.tsx`, `web/src/lib/classification.tsx`,
+  `web/src/index.css`, `web/tailwind.config.js`,
+  `web/src/pages/GameAnalyzer.tsx`, `Home.tsx`, `web/src/types.ts`,
+  `web/src/App.tsx`
+
 ## [3.2.0] — 2026-05-10
 
 A chess.com Game Review parity pass. Three specialist agents (UI designer,

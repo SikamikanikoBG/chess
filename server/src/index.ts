@@ -16,6 +16,9 @@ import metaRoutes from './routes/meta.js';
 import lobbyRoutes from './routes/lobby.js';
 import challengesRoutes from './routes/challenges.js';
 import statsRoutes from './routes/stats.js';
+import reviewRoutes from './routes/review.js';
+import ratingsRoutes from './routes/ratings.js';
+import insightsRoutes from './routes/insights.js';
 import { attachPlayWebSocket } from './ws/play.js';
 import { attachLobbyWebSocket } from './ws/lobby.js';
 
@@ -75,11 +78,16 @@ app.route('/api/auth', authRoutes);
 app.route('/api/settings', settingsRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/games', gamesRoutes);
+// Game Review (AI prose) lives under /api/games/:id/review — mount the review
+// router on the same prefix so it shares URL space.
+app.route('/api/games', reviewRoutes);
 app.route('/api/analyze', analyzeRoutes);
 app.route('/api/coach', coachRoutes);
 app.route('/api/lobby', lobbyRoutes);
 app.route('/api/challenges', challengesRoutes);
 app.route('/api/stats', statsRoutes);
+app.route('/api/ratings', ratingsRoutes);
+app.route('/api/insights', insightsRoutes);
 
 // In production, serve the built web app
 import { existsSync, readFileSync } from 'node:fs';

@@ -5,7 +5,7 @@ import type { Classification } from '../types.js';
 // or estimateElo curve changes — analyses cached at an older version will be
 // silently re-run on next view.
 // ─────────────────────────────────────────────────────────────────────────────
-export const SCORING_VERSION = 4;
+export const SCORING_VERSION = 5;
 
 // First N plies are tagged `book` regardless of engine eval (unless they're an
 // outright mistake / blunder). Mirrors chess.com's behaviour of treating early
@@ -38,21 +38,23 @@ export function moveAccuracy(winBefore: number, winAfter: number): number {
 // real centipawn loss, used as a secondary guard so that "best" requires both
 // near-zero win% drop AND near-zero cp loss (otherwise lopsided positions
 // classify every reasonable move as "best").
-// chess.com-style win-percentage ladder:
+// chess.com-style win-percentage ladder (v5 — re-aligned with chess.com's
+// reported "most moves are excellent" distribution):
 //   isBest                      → best
-//   < 0.5 wp drop & < 8 cpLoss  → excellent (engine tier)
-//   < 2  wp drop                → good
-//   < 5  wp drop                → inaccuracy
-//   < 10 wp drop                → mistake
-//   ≥ 10 wp drop                → blunder
-// `cpLoss` still acts as a guard so lopsided positions (already ±M5) don't
-// classify everything as "best" purely because win% is already saturated.
+//   < 2 wp drop & < 30 cpLoss   → excellent
+//   < 5 wp drop & < 60 cpLoss   → good
+//   < 10 wp drop                → inaccuracy
+//   < 20 wp drop                → mistake
+//   ≥ 20 wp drop                → blunder
+// Pre-v5 used 0.5 / 2 / 5 / 10 — too strict, classified routine moves as
+// inaccuracies. Loosening matches chess.com support docs:
+// https://support.chess.com/en/articles/8572705
 export function classifyByWpDrop(winPctDrop: number, cpLoss: number, isBest: boolean): Classification {
   if (isBest) return 'best';
-  if (winPctDrop < 0.5 && cpLoss < 8) return 'excellent';
-  if (winPctDrop < 2 && cpLoss < 30) return 'good';
-  if (winPctDrop < 5) return 'inaccuracy';
-  if (winPctDrop < 10) return 'mistake';
+  if (winPctDrop < 2 && cpLoss < 30) return 'excellent';
+  if (winPctDrop < 5 && cpLoss < 60) return 'good';
+  if (winPctDrop < 10) return 'inaccuracy';
+  if (winPctDrop < 20) return 'mistake';
   return 'blunder';
 }
 
@@ -111,6 +113,8 @@ export function refineClassification(args: {
   //   - player is NOT already winning by > +500cp (no "brilliant" when crushing)
   //   - more than one legal move (already guaranteed by the forced check above)
   //   - move is non-trivial: not in opening / book territory
+  //   - sacrifice is real, not a trade-recapture sequence (engine PV doesn't
+  //     start with an even recapture in the next 1-2 plies)
   const moveNumber = Number(fenBefore.split(' ')[5] ?? '1');
   if (isBest && moveNumber > 4 && playerEvalBeforeCp <= 500) {
     const matBefore = materialFromFen(fenBefore);
@@ -204,6 +208,36 @@ export function estimateElo(accuracy: number, avgCpl: number): number {
   const fromAcpl = eloFromAcpl(avgCpl);
   const accAdjust = Math.max(-100, Math.min(100, (accuracy - 75) * 10));
   return Math.round(Math.max(300, Math.min(2900, fromAcpl + accAdjust * 0.4)));
+}
+
+// Per-game performance rating, chess.com Game Review style. Blends the
+// player's own strength signal (ACPL + accuracy) with an opponent-anchor that
+// scales with confidence in the opponent's rating. A strong perf vs a 1800
+// opponent means more than the same perf vs a 600.
+export function estimateGamePerformance(args: {
+  accuracy: number;
+  acpl: number;
+  opponentRating: number | null;
+  opponentRd: number | null;
+  // 1 = win, 0.5 = draw, 0 = loss
+  score: 0 | 0.5 | 1;
+}): number {
+  const { accuracy, acpl, opponentRating, opponentRd, score } = args;
+  const fromAcpl = eloFromAcpl(acpl);
+  const accNudge = Math.max(-100, Math.min(100, (accuracy - 75) * 10));
+  const ownStrength = fromAcpl + 0.4 * accNudge;
+
+  // Without a confident opponent rating, fall back to the own-strength estimate.
+  if (opponentRating == null || !Number.isFinite(opponentRating)) {
+    return Math.round(Math.max(300, Math.min(2900, ownStrength)));
+  }
+  // Confidence in the opponent rating shrinks as their RD grows.
+  const rd = opponentRd ?? 350;
+  const oppConf = Math.max(0, Math.min(1, (350 - rd) / 250));
+  const result = score === 1 ? 200 : score === 0 ? -200 : 0;
+  const oppPerf = opponentRating + result;
+  const blend = ownStrength * (1 - 0.4 * oppConf) + oppPerf * (0.4 * oppConf);
+  return Math.round(Math.max(300, Math.min(2900, blend)));
 }
 
 // Centipawn-loss reducer for a single ply. Mate-vs-mate transitions used to

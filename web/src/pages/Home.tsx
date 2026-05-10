@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Swords, BookOpen, Settings as SettingsIcon, ChevronRight, Trophy, Frown, Equal, Zap, Flame, Target, Activity, Download, Sparkles } from 'lucide-react';
+import { Swords, BookOpen, Settings as SettingsIcon, ChevronRight, Trophy, Frown, Equal, Flame, Target, Activity, Download, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../state/auth';
 import { api } from '../api';
@@ -28,37 +28,67 @@ export default function Home() {
     queryFn: () => api.get<Stats>('/api/stats/me'),
   });
 
-  const cards = [
-    { to: '/play',     icon: Swords,        title: t('home.playTitle'),     desc: t('home.playDesc'),     accent: 'from-emerald-500 to-emerald-700', icon_bg: 'bg-emerald-500/15 text-emerald-700' },
-    { to: '/review',   icon: BookOpen,      title: t('home.reviewTitle'),   desc: t('home.reviewDesc'),   accent: 'from-amber-500 to-orange-700',     icon_bg: 'bg-amber-500/15 text-amber-700' },
-    { to: '/settings', icon: SettingsIcon,  title: t('home.settingsTitle'), desc: t('home.settingsDesc'), accent: 'from-slate-500 to-slate-800',      icon_bg: 'bg-slate-500/15 text-slate-700' },
-  ];
-
   const games = data?.games ?? [];
 
   return (
-    <div className="mx-auto max-w-5xl space-y-8">
-      {/* Greeting card */}
+    <div className="mx-auto max-w-6xl space-y-6">
+      {/* Hero Play tile — chess.com green gradient with prominent CTA */}
       <motion.section
         initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-        className="card-hover relative overflow-hidden"
+        className="grid gap-4 md:grid-cols-[1.4fr_1fr]"
       >
-        <div className="absolute inset-0 bg-gradient-to-br from-ink-900 via-ink-900 to-amber-900/20 dark:from-cream dark:via-cream dark:to-amber-100" />
-        <div className="relative flex flex-col gap-3 p-6 sm:p-8">
-          <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-cream/15 text-3xl text-cream backdrop-blur dark:bg-ink-900/15 dark:text-ink-900">
-              {user?.profile.avatar_emoji}
+        <Link to="/play" className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-board-dark via-[#5d7d3f] to-chesscom-700 p-6 text-white shadow-lift transition-transform hover:-translate-y-0.5 sm:p-8">
+          <div className="relative z-10 flex h-full flex-col">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15 text-3xl backdrop-blur">
+                {user?.profile.avatar_emoji ?? '♟'}
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-wider text-white/60">{t('login.title')}</div>
+                <h1 className="text-2xl font-bold sm:text-3xl">
+                  {t('home.greeting', { name: user?.profile.display_name ?? '' })}
+                </h1>
+              </div>
             </div>
-            <div>
-              <div className="text-sm uppercase tracking-wider text-cream/60 dark:text-ink-700/60">{t('login.title')}</div>
-              <h1 className="text-2xl font-bold text-cream dark:text-ink-900 sm:text-3xl">
-                {t('home.greeting', { name: user?.profile.display_name ?? '' })}
-              </h1>
+            <p className="mt-3 max-w-md text-sm text-white/80">
+              {t('app.tagline')}
+            </p>
+            <div className="mt-auto pt-6">
+              <span className="inline-flex items-center gap-2 rounded-xl bg-gold-500 px-4 py-2.5 text-sm font-bold text-chesscom-900 shadow-soft transition-transform group-hover:translate-x-1">
+                <Swords className="h-4 w-4" /> {t('home.playTitle')}
+              </span>
             </div>
           </div>
-          <p className="text-sm text-cream/70 dark:text-ink-700/70">
-            {t('app.tagline')}
-          </p>
+          {/* Decorative chessboard art on the right */}
+          <svg className="pointer-events-none absolute -right-10 -top-10 hidden h-72 w-72 opacity-20 sm:block" viewBox="0 0 8 8" shapeRendering="crispEdges">
+            {Array.from({ length: 64 }).map((_, i) => {
+              const x = i % 8; const y = Math.floor(i / 8);
+              return <rect key={i} x={x} y={y} width={1} height={1} fill={(x + y) % 2 === 0 ? '#eeeed2' : '#769656'} />;
+            })}
+          </svg>
+        </Link>
+
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-1">
+          <Link to="/review" className="card-hover flex items-center gap-3 p-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gold-500/15 text-gold-600">
+              <BookOpen className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold">{t('home.reviewTitle')}</div>
+              <div className="truncate text-xs text-chesscom-500">{t('home.reviewDesc')}</div>
+            </div>
+            <ChevronRight className="h-4 w-4 text-chesscom-400" />
+          </Link>
+          <Link to="/insights" className="card-hover flex items-center gap-3 p-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-board-dark/15 text-board-dark">
+              <Activity className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold">{t('insights.title', { defaultValue: 'Insights' })}</div>
+              <div className="truncate text-xs text-chesscom-500">{t('insights.sub2', { defaultValue: 'Spot your weak patterns' })}</div>
+            </div>
+            <ChevronRight className="h-4 w-4 text-chesscom-400" />
+          </Link>
         </div>
       </motion.section>
 
@@ -115,32 +145,7 @@ export default function Home() {
         </section>
       )}
 
-      {/* Action cards */}
-      <section>
-        <div className="mb-3 flex items-center gap-2">
-          <Zap className="h-4 w-4 text-accent-500" />
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-500">Jump in</h2>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-3">
-          {cards.map((c, i) => (
-            <motion.div key={c.to}
-              initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 * (i + 1) }}>
-              <Link to={c.to} className="group card-hover flex h-full flex-col p-5">
-                <div className={`mb-4 flex h-11 w-11 items-center justify-center rounded-xl ${c.icon_bg}`}>
-                  <c.icon className="h-5 w-5" />
-                </div>
-                <div className="flex flex-1 flex-col">
-                  <div className="text-base font-semibold">{c.title}</div>
-                  <div className="mt-1 text-sm text-ink-500 dark:text-ink-300">{c.desc}</div>
-                </div>
-                <div className="mt-4 flex items-center gap-1 text-sm font-medium text-accent-600 transition-transform group-hover:translate-x-1">
-                  Open <ChevronRight className="h-4 w-4" />
-                </div>
-              </Link>
-            </motion.div>
-          ))}
-        </div>
-      </section>
+      {/* (Hero strip + small tiles above replace the old 3-card grid.) */}
 
       {/* Recent games */}
       {!isLoading && games.length > 0 && (

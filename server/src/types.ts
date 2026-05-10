@@ -48,6 +48,26 @@ export interface AnalyzedMove {
   classification: Classification;
 }
 
+export type GamePhase = 'opening' | 'middlegame' | 'endgame';
+
+export interface PhaseSplit {
+  opening: { from_ply: number; to_ply: number; accuracy_white: number; accuracy_black: number; acpl_white: number; acpl_black: number } | null;
+  middlegame: { from_ply: number; to_ply: number; accuracy_white: number; accuracy_black: number; acpl_white: number; acpl_black: number } | null;
+  endgame: { from_ply: number; to_ply: number; accuracy_white: number; accuracy_black: number; acpl_white: number; acpl_black: number } | null;
+}
+
+export interface KeyMomentSummary {
+  ply: number;
+  side: 'white' | 'black';
+  san: string;
+  fen_before: string;
+  classification: Classification;
+  cp_loss: number;
+  win_pct_delta: number;
+  best_san: string | null;
+  best_pv: string[];
+}
+
 export interface AnalysisResult {
   depth: number;
   moves: AnalyzedMove[];
@@ -55,4 +75,11 @@ export interface AnalysisResult {
   accuracy_black: number;
   estimated_elo_white: number | null;
   estimated_elo_black: number | null;
+  // v4.0.0 additions
+  performance_white: number | null;
+  performance_black: number | null;
+  opening_eco: string | null;
+  opening_name: string | null;
+  key_moments: KeyMomentSummary[];
+  phase_split: PhaseSplit | null;
 }

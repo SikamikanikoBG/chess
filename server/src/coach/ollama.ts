@@ -11,6 +11,35 @@ export function ollamaModel(): string {
   return getSetting('ollama_model') || 'gemma3:1b';
 }
 
+/** Comma-separated CSV of fallback models, tried in order on 404 / model-not-found. */
+export function ollamaFallbackModels(): string[] {
+  const csv = getSetting('ollama_fallback_models') ?? '';
+  return csv.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+// Module-level: which models we've already verified are pulled this server
+// lifetime. Avoids hitting `/api/tags` on every call.
+const verifiedModels = new Set<string>();
+// p95 latency ring buffer for the admin /system surface.
+const latencyRing: number[] = [];
+const LATENCY_RING_MAX = 50;
+function recordLatency(ms: number): void {
+  latencyRing.push(ms);
+  if (latencyRing.length > LATENCY_RING_MAX) latencyRing.shift();
+}
+export function ollamaStats(): { count: number; p95Ms: number | null; lastError: string | null; lastModelUsed: string | null } {
+  const sorted = [...latencyRing].sort((a, b) => a - b);
+  const p95Idx = Math.floor(sorted.length * 0.95);
+  return {
+    count: sorted.length,
+    p95Ms: sorted.length ? Math.round(sorted[Math.min(p95Idx, sorted.length - 1)]!) : null,
+    lastError,
+    lastModelUsed,
+  };
+}
+let lastError: string | null = null;
+let lastModelUsed: string | null = null;
+
 export async function testOllama(url: string): Promise<{ ok: true; models: OllamaModel[] } | { ok: false; error: string }> {
   try {
     const res = await fetch(`${url.replace(/\/$/, '')}/api/tags`, { signal: AbortSignal.timeout(8000) });
@@ -22,6 +51,38 @@ export async function testOllama(url: string): Promise<{ ok: true; models: Ollam
   }
 }
 
+/** Check whether a given model is available on the configured Ollama host.
+ *  Caches positive results so repeated calls are cheap. Returns false on any
+ *  error (caller falls back to next model). */
+export async function ensureModel(model: string): Promise<boolean> {
+  if (verifiedModels.has(model)) return true;
+  const url = ollamaUrl();
+  if (!url) return false;
+  try {
+    const res = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { models?: { name: string }[] };
+    const ok = (data.models ?? []).some((m) => m.name === model || m.name.split(':')[0] === model.split(':')[0]);
+    if (ok) verifiedModels.add(model);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Resolve which model to use, walking the fallback chain. Returns the first
+ *  model that's actually pulled; falls back to the configured default if none
+ *  of the fallback list is present (the call will then fail loudly on 404,
+ *  which is the right surface — admin needs to know to pull a model). */
+export async function resolveModel(preferred?: string): Promise<string> {
+  const want = preferred ?? ollamaModel();
+  if (await ensureModel(want)) return want;
+  for (const m of ollamaFallbackModels()) {
+    if (await ensureModel(m)) return m;
+  }
+  return want;
+}
+
 export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string }
 
 // Streams response chunks. Calls `onChunk` per token batch.
@@ -30,11 +91,13 @@ export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: s
 export async function chatStream(
   messages: ChatMessage[],
   onChunk: (text: string) => void,
-  opts: { model?: string; temperature?: number; topP?: number; numPredict?: number; signal?: AbortSignal; hardTimeoutMs?: number; idleTimeoutMs?: number } = {},
+  opts: { model?: string; temperature?: number; topP?: number; numPredict?: number; signal?: AbortSignal; hardTimeoutMs?: number; idleTimeoutMs?: number; fallback?: boolean } = {},
 ): Promise<void> {
   const url = ollamaUrl();
   if (!url) throw new Error('ollama_not_configured');
-  const model = opts.model ?? ollamaModel();
+  const model = (opts.fallback === false) ? (opts.model ?? ollamaModel()) : await resolveModel(opts.model);
+  lastModelUsed = model;
+  const _started = Date.now();
   const hardMs = opts.hardTimeoutMs ?? 120_000;
   const idleMs = opts.idleTimeoutMs ?? 30_000;
 
@@ -94,10 +157,14 @@ export async function chatStream(
         }
       }
     }
+  } catch (err) {
+    lastError = err instanceof Error ? err.message : String(err);
+    throw err;
   } finally {
     clearTimeout(hardTimer);
     if (idleTimer) clearTimeout(idleTimer);
     opts.signal?.removeEventListener('abort', onAbort);
+    recordLatency(Date.now() - _started);
   }
 }
 
@@ -106,11 +173,13 @@ export async function chatStream(
 // `format: "json"` constrains the model to valid JSON; we still parse defensively.
 export async function chatJson<T = unknown>(
   messages: ChatMessage[],
-  opts: { model?: string; temperature?: number; numPredict?: number; signal?: AbortSignal; timeoutMs?: number } = {},
+  opts: { model?: string; temperature?: number; numPredict?: number; signal?: AbortSignal; timeoutMs?: number; fallback?: boolean } = {},
 ): Promise<T> {
   const url = ollamaUrl();
   if (!url) throw new Error('ollama_not_configured');
-  const model = opts.model ?? ollamaModel();
+  const model = (opts.fallback === false) ? (opts.model ?? ollamaModel()) : await resolveModel(opts.model);
+  lastModelUsed = model;
+  const _started = Date.now();
   const timeoutMs = opts.timeoutMs ?? 180_000;
 
   const ac = new AbortController();
@@ -144,9 +213,32 @@ export async function chatJson<T = unknown>(
     } catch (err) {
       throw new Error(`ollama_bad_json: ${(err as Error).message}: ${cleaned.slice(0, 200)}`);
     }
+  } catch (err) {
+    lastError = err instanceof Error ? err.message : String(err);
+    throw err;
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener('abort', onAbort);
+    recordLatency(Date.now() - _started);
+  }
+}
+
+/** chatJson with a single retry on bad-JSON. The retry adds a "your previous
+ *  reply was not valid JSON" addendum, which small models respond to well. */
+export async function chatJsonRetry<T = unknown>(
+  messages: ChatMessage[],
+  opts: { model?: string; temperature?: number; numPredict?: number; signal?: AbortSignal; timeoutMs?: number; fallback?: boolean } = {},
+): Promise<T> {
+  try {
+    return await chatJson<T>(messages, opts);
+  } catch (err) {
+    const msg = (err as Error).message ?? '';
+    if (!msg.startsWith('ollama_bad_json')) throw err;
+    const retried: ChatMessage[] = [
+      ...messages,
+      { role: 'user', content: 'Your previous reply was not valid JSON. Reply ONLY with the JSON object, no surrounding text.' },
+    ];
+    return chatJson<T>(retried, opts);
   }
 }
 

@@ -4,8 +4,12 @@ import { Chess } from 'chess.js';
 import { lookupUser, SESSION_COOKIE_NAME } from '../auth/sessions.js';
 import { StockfishEngine } from '../chess/stockfish.js';
 import { db } from '../db.js';
-import { analyzePgn } from '../routes/analyze.js';
+import { analyzePgn, analyzePgnFull } from '../routes/analyze.js';
 import { classifyByWpDrop, refineClassification, normalizeEval, cpToWinPct, SCORING_VERSION } from '../chess/classifier.js';
+import { classifyTimeControl, type TimeClass } from '../chess/timeClass.js';
+import { GLICKO_DEFAULTS, inflateRd, updatePair } from '../chess/glicko.js';
+import { chatStream, ollamaUrl } from '../coach/ollama.js';
+import { systemPrompt, explainMovePrompt } from '../coach/prompts.js';
 import type { AuthedUser, Difficulty, Classification } from '../types.js';
 import { notifyUser } from './lobby.js';
 
@@ -350,6 +354,38 @@ async function handleBotConnection(ws: WebSocket, user: AuthedUser) {
               best_san: result.best_san,
               by: 'user',
             });
+            // Auto-pedagogical coach: when the user's coach_behavior is
+            // `always_on_pedagogical` AND the move was a blunder/mistake,
+            // fire a 2-sentence "what went wrong" stream. Gated by Ollama
+            // configured + user setting; never fires for routine moves.
+            if (
+              user.profile.coach_behavior === 'always_on_pedagogical' &&
+              ollamaUrl() !== null &&
+              (result.classification === 'blunder' || result.classification === 'mistake')
+            ) {
+              try {
+                const sys = systemPrompt(user.profile.audience, user.profile.language);
+                const usr = explainMovePrompt({
+                  fen: fenBefore,
+                  player: userPly % 2 === 1 ? 'White' : 'Black',
+                  played_san: move.san,
+                  best_san: result.best_san,
+                  classification: result.classification,
+                  cp_loss: result.cp_loss,
+                  pv_san: [],
+                  user_perspective: true,
+                }, user.profile.language, user.profile.audience);
+                let acc = '';
+                await chatStream(
+                  [{ role: 'system', content: sys }, { role: 'user', content: usr }],
+                  (t) => { acc += t; send(ws, 'coach_chunk', { ply: userPly, text: t }); },
+                  { numPredict: 120, temperature: 0.3 },
+                );
+                send(ws, 'coach_done', { ply: userPly, text: acc });
+              } catch (err) {
+                console.warn('[auto-coach] failed', err);
+              }
+            }
           } catch (err) {
             console.error('[classify-user-move]', err);
           }
@@ -462,18 +498,23 @@ async function endBotGame(ws: WebSocket, session: BotSession, result: '1-0' | '0
   session.chess.header('Date', new Date().toISOString().slice(0, 10).replace(/-/g, '.'));
   const pgn = session.chess.pgn();
 
+  const tcString = session.timeControl
+    ? `${session.timeControl.initial / 1000}+${session.timeControl.increment / 1000}`
+    : 'untimed';
+  const tcClass = classifyTimeControl(tcString);
   const r = db.prepare(`
-    INSERT INTO games (user_id, source, external_id, pgn, white, black, result, time_control, end_time, user_color)
-    VALUES (?, 'played', ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO games (user_id, source, external_id, pgn, white, black, result, time_control, end_time, user_color, rated, time_class)
+    VALUES (?, 'played', ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
   `).run(
     userId,
     `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     pgn, white, black,
     result === '1-0' && session.userColor === 'white' || result === '0-1' && session.userColor === 'black' ? 'win'
       : result === '1/2-1/2' ? 'draw' : 'loss',
-    session.timeControl ? `${session.timeControl.initial / 1000}+${session.timeControl.increment / 1000}` : 'untimed',
+    tcString,
     new Date().toISOString(),
     session.userColor,
+    tcClass,
   );
   const gameId = Number(r.lastInsertRowid);
   send(ws, 'game_saved', { game_id: gameId });
@@ -507,6 +548,7 @@ interface GameDbRow {
   user_color: 'white' | 'black'; time_control: string;
   external_id: string; pgn: string;
   white_time_ms: number | null; black_time_ms: number | null; last_move_at: string | null;
+  rated: number | null; time_class: string | null;
 }
 
 // Persist clocks + last-move timestamp on every PvP move so a refresh / server
@@ -521,7 +563,7 @@ function persistPvpClocks(session: PvpSession): void {
 
 async function handlePvpConnection(ws: WebSocket, user: AuthedUser, gameId: number) {
   // Resolve game (this user's perspective row)
-  const row = db.prepare(`SELECT id, user_id, opponent_user_id, white, black, user_color, time_control, external_id, pgn, white_time_ms, black_time_ms, last_move_at FROM games WHERE id = ? AND user_id = ?`).get(gameId, user.id) as GameDbRow | undefined;
+  const row = db.prepare(`SELECT id, user_id, opponent_user_id, white, black, user_color, time_control, external_id, pgn, white_time_ms, black_time_ms, last_move_at, rated, time_class FROM games WHERE id = ? AND user_id = ?`).get(gameId, user.id) as GameDbRow | undefined;
   if (!row) {
     send(ws, 'error', { message: 'game_not_found' });
     ws.close();
@@ -752,20 +794,54 @@ async function endPvpGame(session: PvpSession, result: '1-0' | '0-1' | '1/2-1/2'
   if (session.analysisEngine) session.analysisEngine.quit().catch(() => { /* ignore */ });
   pvpSessions.delete(session.game_id);
 
+  // Apply Glicko-1 rating updates if the game was rated.
+  applyRatedUpdate(session, result);
+
   // Background analyze for both rows
   setImmediate(async () => {
     try {
-      const analysis = await analyzePgn(pgn, 14);
-      const ids = db.prepare(`SELECT id FROM games WHERE external_id = ?`).all(session.external_id) as { id: number }[];
-      for (const { id } of ids) {
+      // Look up the games row (any color) to get rating + opponent context for the
+      // performance-rating estimator. The rating-before columns were stamped by
+      // applyRatedUpdate above (or remain null for unrated games).
+      const ids = db.prepare(`SELECT id, user_color, opponent_rating_before, user_rd_before FROM games WHERE external_id = ?`).all(session.external_id) as { id: number; user_color: 'white' | 'black' | null; opponent_rating_before: number | null; user_rd_before: number | null }[];
+      for (const r of ids) {
+        const score = scoreFor(result, r.user_color ?? 'white');
+        const analysis = await analyzePgnFull(pgn, 14, {
+          score,
+          userColor: r.user_color ?? 'white',
+          opponentRating: r.opponent_rating_before,
+          opponentRd: r.user_rd_before,
+        });
         db.prepare(`
-          INSERT INTO analyses (game_id, depth, accuracy_white, accuracy_black, estimated_elo_white, estimated_elo_black, moves_json, scoring_version)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(game_id) DO UPDATE SET depth = excluded.depth,
+          INSERT INTO analyses (game_id, depth, accuracy_white, accuracy_black,
+            estimated_elo_white, estimated_elo_black,
+            performance_white, performance_black,
+            opening_eco, opening_name,
+            key_moments_json, phase_split_json,
+            moves_json, scoring_version)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(game_id) DO UPDATE SET
+            depth = excluded.depth,
             accuracy_white = excluded.accuracy_white, accuracy_black = excluded.accuracy_black,
             estimated_elo_white = excluded.estimated_elo_white, estimated_elo_black = excluded.estimated_elo_black,
+            performance_white = excluded.performance_white, performance_black = excluded.performance_black,
+            opening_eco = excluded.opening_eco, opening_name = excluded.opening_name,
+            key_moments_json = excluded.key_moments_json, phase_split_json = excluded.phase_split_json,
             moves_json = excluded.moves_json, scoring_version = excluded.scoring_version
-        `).run(id, 14, analysis.accuracy_white, analysis.accuracy_black, analysis.estimated_elo_white, analysis.estimated_elo_black, JSON.stringify(analysis.moves), SCORING_VERSION);
+        `).run(
+          r.id, 14,
+          analysis.accuracy_white, analysis.accuracy_black,
+          analysis.estimated_elo_white, analysis.estimated_elo_black,
+          analysis.performance_white, analysis.performance_black,
+          analysis.opening_eco, analysis.opening_name,
+          JSON.stringify(analysis.key_moments),
+          analysis.phase_split ? JSON.stringify(analysis.phase_split) : null,
+          JSON.stringify(analysis.moves), SCORING_VERSION,
+        );
+        if (analysis.opening_eco || analysis.opening_name) {
+          db.prepare(`UPDATE games SET eco = ?, opening_name = ? WHERE id = ?`)
+            .run(analysis.opening_eco, analysis.opening_name, r.id);
+        }
       }
       // Notify the still-connected sockets that analysis is ready
       for (const color of ['white', 'black'] as const) {
@@ -776,4 +852,108 @@ async function endPvpGame(session: PvpSession, result: '1-0' | '0-1' | '1/2-1/2'
       console.error('[pvp-auto-analyze]', err);
     }
   });
+}
+
+function scoreFor(result: '1-0' | '0-1' | '1/2-1/2', color: 'white' | 'black'): 0 | 0.5 | 1 {
+  if (result === '1/2-1/2') return 0.5;
+  if (result === '1-0') return color === 'white' ? 1 : 0;
+  return color === 'black' ? 1 : 0;
+}
+
+interface RatingRowDb { rating: number; rd: number; games_played: number; last_played_at: string | null }
+
+/** Glicko-1 update for a finished rated PvP game. Idempotent — safe to call
+ *  twice; the second invocation no-ops because `games.user_rating_after` is
+ *  already populated. */
+function applyRatedUpdate(session: PvpSession, result: '1-0' | '0-1' | '1/2-1/2'): void {
+  // Look up both rows + the rating context.
+  const rows = db.prepare(`
+    SELECT id, user_id, user_color, opponent_user_id, time_class, rated, user_rating_after
+    FROM games WHERE external_id = ?
+  `).all(session.external_id) as { id: number; user_id: number; user_color: 'white' | 'black'; opponent_user_id: number | null; time_class: string | null; rated: number | null; user_rating_after: number | null }[];
+
+  if (rows.length === 0) return;
+  // Already updated? Skip.
+  if (rows.some((r) => r.user_rating_after != null)) return;
+  // Pull the rated flag + time class from any row (they're equal across the pair).
+  const sample = rows[0]!;
+  if (sample.rated !== 1) return;
+  const tc = (sample.time_class as TimeClass | null) ?? classifyTimeControl(null);
+  if (!tc) return;
+
+  // Identify white + black rows.
+  const whiteRow = rows.find((r) => r.user_color === 'white');
+  const blackRow = rows.find((r) => r.user_color === 'black');
+  if (!whiteRow || !blackRow) return;
+  if (!whiteRow.user_id || !blackRow.user_id) return;
+
+  // Load (or create at defaults) ratings for both users in this time class.
+  const whiteRating = loadOrInitRating(whiteRow.user_id, tc);
+  const blackRating = loadOrInitRating(blackRow.user_id, tc);
+
+  // Inflate RDs by idle days first.
+  const now = Date.now();
+  const wDays = whiteRating.last_played_at ? Math.max(0, (now - Date.parse(whiteRating.last_played_at)) / 86_400_000) : 0;
+  const bDays = blackRating.last_played_at ? Math.max(0, (now - Date.parse(blackRating.last_played_at)) / 86_400_000) : 0;
+  const whiteRdInflated = inflateRd(whiteRating.rd, wDays);
+  const blackRdInflated = inflateRd(blackRating.rd, bDays);
+
+  const update = updatePair({
+    whiteR: whiteRating.rating, whiteRd: whiteRdInflated,
+    blackR: blackRating.rating, blackRd: blackRdInflated,
+    result,
+  });
+
+  const nowIso = new Date(now).toISOString();
+  // Persist rating snapshots on both games rows + bump the per-pool ratings table.
+  const tx = db.transaction(() => {
+    db.prepare(`UPDATE games SET
+        user_rating_before = ?, user_rating_after = ?,
+        opponent_rating_before = ?, opponent_rating_after = ?,
+        user_rd_before = ?, user_rd_after = ?
+      WHERE id = ?`).run(
+      whiteRating.rating, update.white.newR,
+      blackRating.rating, update.black.newR,
+      whiteRdInflated, update.white.newRd,
+      whiteRow.id,
+    );
+    db.prepare(`UPDATE games SET
+        user_rating_before = ?, user_rating_after = ?,
+        opponent_rating_before = ?, opponent_rating_after = ?,
+        user_rd_before = ?, user_rd_after = ?
+      WHERE id = ?`).run(
+      blackRating.rating, update.black.newR,
+      whiteRating.rating, update.white.newR,
+      blackRdInflated, update.black.newRd,
+      blackRow.id,
+    );
+    upsertRating(whiteRow.user_id, tc, update.white.newR, update.white.newRd, nowIso);
+    upsertRating(blackRow.user_id, tc, update.black.newR, update.black.newRd, nowIso);
+    db.prepare(`INSERT INTO rating_history (game_id, user_id, time_class, rating_before, rating_after, rd_before, rd_after)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(whiteRow.id, whiteRow.user_id, tc, whiteRating.rating, update.white.newR, whiteRdInflated, update.white.newRd);
+    db.prepare(`INSERT INTO rating_history (game_id, user_id, time_class, rating_before, rating_after, rd_before, rd_after)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(blackRow.id, blackRow.user_id, tc, blackRating.rating, update.black.newR, blackRdInflated, update.black.newRd);
+  });
+  tx();
+}
+
+function loadOrInitRating(userId: number, tc: TimeClass): RatingRowDb {
+  const row = db.prepare(`SELECT rating, rd, games_played, last_played_at
+                          FROM ratings WHERE user_id = ? AND time_class = ?`)
+    .get(userId, tc) as RatingRowDb | undefined;
+  if (row) return row;
+  return { rating: GLICKO_DEFAULTS.rating, rd: GLICKO_DEFAULTS.rd, games_played: 0, last_played_at: null };
+}
+
+function upsertRating(userId: number, tc: TimeClass, rating: number, rd: number, lastIso: string): void {
+  db.prepare(`INSERT INTO ratings (user_id, time_class, rating, rd, games_played, last_played_at)
+              VALUES (?, ?, ?, ?, 1, ?)
+              ON CONFLICT(user_id, time_class) DO UPDATE SET
+                rating = excluded.rating,
+                rd = excluded.rd,
+                games_played = ratings.games_played + 1,
+                last_played_at = excluded.last_played_at
+            `).run(userId, tc, rating, rd, lastIso);
 }

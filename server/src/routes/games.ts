@@ -14,15 +14,19 @@ router.get('/', (c) => {
   // An analysis cached at an older scoring_version reads as "not analyzed" in
   // the list — accuracy values from the old scoring would mislead the user.
   const rows = db.prepare(`
-    SELECT g.id, g.source, g.external_id, g.white, g.black, g.result, g.time_control, g.end_time, g.user_color,
+    SELECT g.id, g.source, g.external_id, g.white, g.black, g.result, g.time_control, g.time_class,
+           g.eco, g.opening_name, g.end_time, g.user_color, g.rated,
+           g.user_rating_after, g.opponent_rating_after,
            CASE WHEN a.game_id IS NOT NULL AND a.scoring_version >= ? THEN 1 ELSE 0 END as analyzed,
            CASE WHEN a.scoring_version >= ? THEN a.accuracy_white ELSE NULL END as accuracy_white,
-           CASE WHEN a.scoring_version >= ? THEN a.accuracy_black ELSE NULL END as accuracy_black
+           CASE WHEN a.scoring_version >= ? THEN a.accuracy_black ELSE NULL END as accuracy_black,
+           CASE WHEN a.scoring_version >= ? THEN a.performance_white ELSE NULL END as performance_white,
+           CASE WHEN a.scoring_version >= ? THEN a.performance_black ELSE NULL END as performance_black
     FROM games g LEFT JOIN analyses a ON a.game_id = g.id
     WHERE g.user_id = ?
     ORDER BY g.end_time DESC NULLS LAST, g.id DESC
     LIMIT ?
-  `).all(SCORING_VERSION, SCORING_VERSION, SCORING_VERSION, user.id, limit);
+  `).all(SCORING_VERSION, SCORING_VERSION, SCORING_VERSION, SCORING_VERSION, SCORING_VERSION, user.id, limit);
   return c.json({ games: rows });
 });
 
@@ -69,9 +73,11 @@ router.post('/import/chesscom', async (c) => {
   if (!player) return c.json({ error: 'player_not_found' }, 404);
 
   const games = await fetchRecentGames(username, parsed.data.limit);
+  // Imported chess.com games are NEVER rated in Patzer's pool — they have their
+  // own chess.com rating that lives there. Only PvP games inside Patzer count.
   const stmt = db.prepare(`
-    INSERT INTO games (user_id, source, external_id, pgn, white, black, result, time_control, end_time, user_color)
-    VALUES (?, 'chesscom', ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO games (user_id, source, external_id, pgn, white, black, result, time_control, time_class, end_time, user_color, rated)
+    VALUES (?, 'chesscom', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
     ON CONFLICT(user_id, source, external_id) DO NOTHING
   `);
 
@@ -82,6 +88,8 @@ router.post('/import/chesscom', async (c) => {
       g.white.username.toLowerCase() === lcUsername ? 'white' :
       g.black.username.toLowerCase() === lcUsername ? 'black' : null;
     const result = resultFor(g, userColor);
+    // chess.com sends `time_class` directly — use it as the source of truth.
+    const timeClass = ['bullet', 'blitz', 'rapid', 'daily'].includes(g.time_class) ? g.time_class : null;
     const r = stmt.run(
       user.id,
       g.url,
@@ -90,6 +98,7 @@ router.post('/import/chesscom', async (c) => {
       g.black.username,
       result,
       g.time_control,
+      timeClass,
       new Date(g.end_time * 1000).toISOString(),
       userColor,
     );

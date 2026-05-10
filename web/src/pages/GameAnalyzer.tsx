@@ -2,27 +2,33 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Sparkles, Trophy, Settings as SettingsIcon, Copy, Download, Check } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Sparkles, Settings as SettingsIcon, Copy, Download, Check, ListOrdered, Lightbulb, FileText } from 'lucide-react';
 import { Chess } from 'chess.js';
 import ChessBoard from '../components/ChessBoard';
 import EvalBar from '../components/EvalBar';
 import EvalGraph from '../components/EvalGraph';
 import MoveList from '../components/MoveList';
 import CoachPanel from '../components/CoachPanel';
-import ClassificationStats from '../components/ClassificationStats';
+import GameReportCard from '../components/GameReportCard';
+import GameReportPanel, { type GameReviewProse } from '../components/GameReportPanel';
+import KeyMomentsList from '../components/KeyMomentsList';
+import OpeningBanner from '../components/OpeningBanner';
 import ClassificationBadge from '../components/ClassificationBadge';
 import CapturedPieces from '../components/CapturedPieces';
 import { soundForMove, inferMoveFlagsFromSan } from '../lib/sounds';
 import { api } from '../api';
-import { fmtAccuracy } from '../lib/utils';
 import { useAuth } from '../state/auth';
-import type { AnalysisResult, AnalyzedMove, Classification } from '../types';
+import type { AnalysisResult, AnalyzedMove, KeyMomentSummary, PhaseSplit } from '../types';
 
 interface GameDetail {
-  game: { id: number; pgn: string; white: string; black: string; result: string; user_color: 'white' | 'black' | null };
+  game: { id: number; pgn: string; white: string; black: string; result: string; user_color: 'white' | 'black' | null; eco?: string | null; opening_name?: string | null };
   analysis: {
     depth: number; accuracy_white: number; accuracy_black: number;
     estimated_elo_white: number | null; estimated_elo_black: number | null;
+    performance_white: number | null; performance_black: number | null;
+    opening_eco: string | null; opening_name: string | null;
+    key_moments_json: string | null;
+    phase_split_json: string | null;
     moves_json: string;
   } | null;
   analysis_stale?: boolean;
@@ -35,6 +41,8 @@ function fmtCp(cp: number | null | undefined): string {
   const sign = cp > 0 ? '+' : cp < 0 ? '−' : '';
   return `${sign}${(Math.abs(cp) / 100).toFixed(2)}`;
 }
+
+type Tab = 'review' | 'report' | 'moments' | 'coach';
 
 export default function GameAnalyzer() {
   const { id } = useParams<{ id: string }>();
@@ -53,29 +61,44 @@ export default function GameAnalyzer() {
   const [coachConfigured, setCoachConfigured] = useState(false);
   const [requestedDepth, setRequestedDepth] = useState(16);
   const [showDepthControl, setShowDepthControl] = useState(false);
+  const [reviewProse, setReviewProse] = useState<GameReviewProse | null>(null);
+  const [tab, setTab] = useState<Tab>('review');
 
   useEffect(() => {
     if (!data) return;
     if (data.analysis) {
+      const a = data.analysis;
       setAnalysis({
-        depth: data.analysis.depth,
-        accuracy_white: data.analysis.accuracy_white,
-        accuracy_black: data.analysis.accuracy_black,
-        estimated_elo_white: data.analysis.estimated_elo_white,
-        estimated_elo_black: data.analysis.estimated_elo_black,
-        moves: JSON.parse(data.analysis.moves_json),
+        depth: a.depth,
+        accuracy_white: a.accuracy_white,
+        accuracy_black: a.accuracy_black,
+        estimated_elo_white: a.estimated_elo_white,
+        estimated_elo_black: a.estimated_elo_black,
+        performance_white: a.performance_white ?? null,
+        performance_black: a.performance_black ?? null,
+        opening_eco: a.opening_eco,
+        opening_name: a.opening_name,
+        key_moments: a.key_moments_json ? (JSON.parse(a.key_moments_json) as KeyMomentSummary[]) : [],
+        phase_split: a.phase_split_json ? (JSON.parse(a.phase_split_json) as PhaseSplit) : null,
+        moves: JSON.parse(a.moves_json) as AnalyzedMove[],
       });
-      setRequestedDepth(Math.max(16, data.analysis.depth));
+      setRequestedDepth(Math.max(16, a.depth));
     } else {
       setAnalysis(null);
     }
-    // Auto-rerun once if the backend says the cached analysis was stale (older
-    // scoring version). Silent — the user just sees the spinner briefly.
     if (data.analysis_stale && !analyzing) {
       void analyze(16, true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
+
+  // Load any cached AI prose for this game
+  useEffect(() => {
+    if (!gameId) return;
+    api.get<{ review: GameReviewProse | null }>(`/api/games/${gameId}/review`)
+      .then((r) => setReviewProse(r.review))
+      .catch(() => setReviewProse(null));
+  }, [gameId]);
 
   useEffect(() => {
     api.get<{ configured: boolean }>('/api/coach/status')
@@ -101,7 +124,6 @@ export default function GameAnalyzer() {
 
   useEffect(() => { setPly(0); }, [gameId]);
 
-  // Play move sounds as the user steps through the game
   const prevPlyRef = useRef(ply);
   useEffect(() => {
     if (ply === prevPlyRef.current) return;
@@ -136,14 +158,6 @@ export default function GameAnalyzer() {
     }
   }
 
-  function jumpToFirstClassification(cls: Classification, side: 'white' | 'black') {
-    if (!analysis) return;
-    const wantParity = side === 'white' ? 1 : 0;
-    for (const m of analysis.moves) {
-      if (m.classification === cls && (m.ply % 2 === wantParity)) { setPly(m.ply); return; }
-    }
-  }
-
   if (isLoading || !data) return <AnalyzerSkeleton />;
 
   const pos = positions[ply] ?? positions[0];
@@ -173,24 +187,33 @@ export default function GameAnalyzer() {
     brush: 'paleBlue',
   }] : [];
 
+  const eco = analysis?.opening_eco ?? data.game.eco ?? null;
+  const openingName = analysis?.opening_name ?? data.game.opening_name ?? null;
+
   return (
-    <div className="mx-auto max-w-6xl">
-      <div className="mb-4 flex items-center justify-between gap-3">
+    <div className="mx-auto max-w-7xl">
+      <div className="mb-3 flex items-center justify-between gap-3">
         <Link to="/review" className="btn-ghost text-sm shrink-0"><ChevronLeft className="h-4 w-4" />{t('common.back')}</Link>
-        <div className="min-w-0 truncate text-right text-sm text-ink-500">
-          <span className="font-medium text-ink-700 dark:text-ink-200">{data.game.white}</span> vs{' '}
-          <span className="font-medium text-ink-700 dark:text-ink-200">{data.game.black}</span>
+        <div className="min-w-0 truncate text-right text-sm text-chesscom-500">
+          <span className="font-medium text-chesscom-900 dark:text-chesscom-100">{data.game.white}</span> vs{' '}
+          <span className="font-medium text-chesscom-900 dark:text-chesscom-100">{data.game.black}</span>
           <span className="ml-2">· {data.game.result}</span>
         </div>
       </div>
 
-      <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:gap-5">
+        {/* BOARD COLUMN */}
         <div className="mx-auto w-full lg:mx-0 lg:flex-1 lg:max-w-[760px]">
-          {/* Captured by the side at top of the board */}
-          <div className="mb-1 px-1"><CapturedPieces fen={pos?.fen ?? ''} side={orientation === 'white' ? 'black' : 'white'} /></div>
-          <div className="relative flex items-stretch gap-2">
+          <PlayerHeader
+            name={orientation === 'white' ? data.game.black : data.game.white}
+            accuracy={orientation === 'white' ? analysis?.accuracy_black : analysis?.accuracy_white}
+            elo={orientation === 'white' ? analysis?.estimated_elo_black : analysis?.estimated_elo_white}
+            side={orientation === 'white' ? 'black' : 'white'}
+            fen={pos?.fen ?? ''}
+          />
+          <div className="relative my-2 flex items-stretch gap-2">
             <EvalBar cp={currentEvalCp} orientation={orientation} />
-            <div className={`relative min-w-0 flex-1 board-theme-${user?.profile.board_theme ?? 'wood'}`}>
+            <div className={`relative min-w-0 flex-1 board-theme-${user?.profile.board_theme ?? 'green'}`}>
               <ChessBoard
                 fen={pos?.fen ?? 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'}
                 orientation={orientation}
@@ -202,15 +225,22 @@ export default function GameAnalyzer() {
               )}
             </div>
           </div>
-          {/* Captured by the side at the bottom (the player whose POV we're in) */}
-          <div className="mt-1 px-1"><CapturedPieces fen={pos?.fen ?? ''} side={orientation} /></div>
-          <div className="mt-2 flex items-center justify-between rounded-lg bg-white px-3 py-2 text-sm shadow-soft dark:bg-ink-800">
-            <div className="min-w-0 truncate text-ink-500">
+          <PlayerHeader
+            name={orientation === 'white' ? data.game.white : data.game.black}
+            accuracy={orientation === 'white' ? analysis?.accuracy_white : analysis?.accuracy_black}
+            elo={orientation === 'white' ? analysis?.estimated_elo_white : analysis?.estimated_elo_black}
+            side={orientation}
+            fen={pos?.fen ?? ''}
+            highlighted
+          />
+
+          <div className="mt-2 flex items-center justify-between rounded-lg bg-white px-3 py-2 text-sm shadow-soft dark:bg-chesscom-800">
+            <div className="min-w-0 truncate text-chesscom-500">
               {move ? (
                 <>
-                  <span className="font-medium text-ink-900 dark:text-cream">{ply % 2 === 1 ? 'W' : 'B'}: {move.san}</span>
+                  <span className="font-medium text-chesscom-900 dark:text-chesscom-100">{ply % 2 === 1 ? 'W' : 'B'}: {move.san}</span>
                   {move.best_move_san && move.best_move_san !== move.san && (
-                    <span className="ml-2 text-xs text-ink-400">best: {move.best_move_san}</span>
+                    <span className="ml-2 text-xs text-chesscom-400">best: {move.best_move_san}</span>
                   )}
                 </>
               ) : <span className="italic">starting position</span>}
@@ -222,15 +252,29 @@ export default function GameAnalyzer() {
           <div className="mt-3 flex items-center justify-center gap-2">
             <button onClick={() => setPly(0)} className="btn-secondary h-12 w-12 p-0" title="First"><ChevronsLeft className="h-5 w-5" /></button>
             <button onClick={() => setPly((p) => Math.max(0, p - 1))} className="btn-secondary h-12 w-12 p-0" title="Previous"><ChevronLeft className="h-5 w-5" /></button>
-            <div className="flex h-12 min-w-[5.5rem] items-center justify-center rounded-xl bg-ink-100 px-3 text-sm font-mono tabular-nums dark:bg-ink-800">
+            <div className="flex h-12 min-w-[5.5rem] items-center justify-center rounded-xl bg-chesscom-100 px-3 text-sm font-mono tabular-nums dark:bg-chesscom-800">
               {ply} / {positions.length - 1}
             </div>
             <button onClick={() => setPly((p) => Math.min(positions.length - 1, p + 1))} className="btn-secondary h-12 w-12 p-0" title="Next"><ChevronRight className="h-5 w-5" /></button>
             <button onClick={() => setPly(positions.length - 1)} className="btn-secondary h-12 w-12 p-0" title="Last"><ChevronsRight className="h-5 w-5" /></button>
           </div>
+
+          {analysis && (
+            <div className="mt-3 card p-2">
+              <EvalGraph
+                evals={analysis.moves.map((m) => ({ ply: m.ply, cp: m.eval_after_cp }))}
+                current={ply}
+                onClick={(p) => setPly(p)}
+                markers={analysis.moves
+                  .filter((m) => ['blunder','mistake','inaccuracy','miss','brilliant','great'].includes(m.classification))
+                  .map((m) => ({ ply: m.ply, classification: m.classification }))}
+              />
+            </div>
+          )}
         </div>
 
-        <div className="min-w-0 space-y-3 lg:w-[360px] lg:flex-initial lg:max-w-md">
+        {/* RIGHT RAIL */}
+        <div className="min-w-0 space-y-3 lg:w-[380px] lg:flex-initial lg:max-w-md">
           {!analysis && (
             <button onClick={() => analyze(requestedDepth, false)} disabled={analyzing} className="btn-primary w-full">
               <Sparkles className="h-4 w-4" />
@@ -240,15 +284,20 @@ export default function GameAnalyzer() {
 
           {analysis && (
             <>
-              <SummaryCard
+              <OpeningBanner eco={eco} name={openingName} prose={reviewProse?.opening?.prose} />
+
+              <GameReportCard
+                whiteName={data.game.white}
+                blackName={data.game.black}
                 accuracyW={analysis.accuracy_white}
                 accuracyB={analysis.accuracy_black}
                 eloW={analysis.estimated_elo_white}
                 eloB={analysis.estimated_elo_black}
-                depth={analysis.depth}
-                whiteName={data.game.white}
-                blackName={data.game.black}
-                onToggleDepth={() => setShowDepthControl((s) => !s)}
+                perfW={analysis.performance_white}
+                perfB={analysis.performance_black}
+                moves={analysis.moves}
+                phaseSplit={analysis.phase_split}
+                userColor={userColor}
               />
 
               {showDepthControl && (
@@ -263,7 +312,7 @@ export default function GameAnalyzer() {
                     onChange={(e) => setRequestedDepth(Number(e.target.value))}
                     className="w-full"
                   />
-                  <div className="mt-1 flex justify-between text-[10px] text-ink-400">
+                  <div className="mt-1 flex justify-between text-[10px] text-chesscom-400">
                     <span>fast (8)</span>
                     <span>quality (16)</span>
                     <span>deep (22)</span>
@@ -276,50 +325,77 @@ export default function GameAnalyzer() {
                     <Sparkles className="h-4 w-4" />
                     {analyzing ? t('review.analyzing', { progress: '…' }) : `${t('review.reanalyze')} (depth ${requestedDepth})`}
                   </button>
-                  <div className="mt-2 text-[11px] text-ink-400">
-                    Higher depth = more accurate, slower. Re-analyzing replaces the existing analysis.
-                  </div>
                 </div>
               )}
 
-              {coachReq && (
-                <CoachPanel
-                  systemConfigured={coachConfigured}
-                  request={coachReq}
-                  autoPlay
-                  triggerKey={ply}
-                  debounceMs={700}
-                />
-              )}
-
-              <ClassificationStats
-                moves={analysis.moves}
-                whiteName={data.game.white}
-                blackName={data.game.black}
-                onClickClassification={jumpToFirstClassification}
-              />
-
-              <div className="card p-2">
-                <EvalGraph
-                  evals={analysis.moves.map((m) => ({ ply: m.ply, cp: m.eval_after_cp }))}
-                  current={ply}
-                  onClick={(p) => setPly(p)}
-                  markers={analysis.moves
-                    .filter((m) => ['blunder','mistake','inaccuracy','miss','brilliant'].includes(m.classification))
-                    .map((m) => ({ ply: m.ply, classification: m.classification }))}
-                />
+              {/* Tab strip — Review (move list), Report (AI prose), Moments, Coach */}
+              <div className="card overflow-hidden">
+                <div className="flex items-center gap-1 border-b border-chesscom-100 bg-chesscom-50/40 px-2 dark:border-chesscom-700 dark:bg-chesscom-900/40">
+                  <TabBtn active={tab === 'review'} onClick={() => setTab('review')} icon={ListOrdered} label={t('review.moves')} />
+                  <TabBtn active={tab === 'report'} onClick={() => setTab('report')} icon={FileText} label={t('review.gameReport', { defaultValue: 'Report' })} />
+                  <TabBtn active={tab === 'moments'} onClick={() => setTab('moments')} icon={Sparkles} label={t('review.keyMoments', { defaultValue: 'Key' })} />
+                  <TabBtn active={tab === 'coach'} onClick={() => setTab('coach')} icon={Lightbulb} label={t('coach.title')} />
+                  <button onClick={() => setShowDepthControl((s) => !s)} className="btn-ghost ml-auto p-1.5" title={t('review.depth')}>
+                    <SettingsIcon className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="p-3">
+                  {tab === 'review' && (
+                    <MoveList
+                      moves={analysis.moves.map((m) => ({ ply: m.ply, san: m.san, classification: m.classification }))}
+                      current={ply}
+                      onSelect={setPly}
+                      maxHeight={460}
+                    />
+                  )}
+                  {tab === 'report' && (
+                    <GameReportPanel
+                      gameId={gameId}
+                      initial={reviewProse}
+                      onMomentJump={setPly}
+                      onGenerated={setReviewProse}
+                    />
+                  )}
+                  {tab === 'moments' && (
+                    <KeyMomentsList
+                      items={analysis.key_moments.map((m) => {
+                        const proseHit = reviewProse?.key_moments.find((p) => p.ply === m.ply);
+                        return {
+                          ply: m.ply,
+                          side: m.side,
+                          san: m.san,
+                          classification: m.classification,
+                          cp_loss: m.cp_loss,
+                          win_pct_delta: m.win_pct_delta,
+                          best_san: m.best_san,
+                          title: proseHit?.title,
+                          prose: proseHit?.prose,
+                        };
+                      })}
+                      current={ply}
+                      onSelect={setPly}
+                    />
+                  )}
+                  {tab === 'coach' && coachReq && (
+                    <CoachPanel
+                      systemConfigured={coachConfigured}
+                      request={coachReq}
+                      autoPlay
+                      triggerKey={ply}
+                      debounceMs={700}
+                      compact
+                    />
+                  )}
+                  {tab === 'coach' && !coachReq && (
+                    <div className="p-4 text-sm text-chesscom-500">{t('review.coachIdleHint', { defaultValue: 'Step into a move to see what the coach has to say.' })}</div>
+                  )}
+                </div>
               </div>
 
               <ExportRow
                 pgn={data.game.pgn}
                 fen={pos?.fen ?? ''}
                 fileBase={`${(data.game.white || 'white').replace(/[^A-Za-z0-9]+/g, '_')}_vs_${(data.game.black || 'black').replace(/[^A-Za-z0-9]+/g, '_')}`}
-              />
-
-              <MoveList
-                moves={analysis.moves.map((m) => ({ ply: m.ply, san: m.san, classification: m.classification }))}
-                current={ply}
-                onSelect={setPly}
               />
             </>
           )}
@@ -329,29 +405,31 @@ export default function GameAnalyzer() {
   );
 }
 
-function SummaryCard({
-  accuracyW, accuracyB, eloW, eloB, depth, whiteName, blackName, onToggleDepth,
-}: {
-  accuracyW: number; accuracyB: number;
-  eloW: number | null; eloB: number | null;
-  depth: number; whiteName: string; blackName: string;
-  onToggleDepth: () => void;
-}) {
-  const { t } = useTranslation();
+function PlayerHeader({ name, accuracy, elo, side, fen, highlighted }: { name: string; accuracy?: number; elo?: number | null; side: 'white' | 'black'; fen: string; highlighted?: boolean }) {
   return (
-    <div className="card p-4">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-500">{t('review.summary')}</h3>
-      <div className="grid grid-cols-2 gap-2">
-        <PlayerCell label={t('review.white')} name={whiteName} accuracy={accuracyW} elo={eloW} side="white" />
-        <PlayerCell label={t('review.black')} name={blackName} accuracy={accuracyB} elo={eloB} side="black" />
+    <div className={`flex items-center justify-between rounded-lg px-3 py-2 ${highlighted ? 'bg-chesscom-900 text-white shadow-soft' : 'bg-white text-chesscom-900 shadow-soft dark:bg-chesscom-800 dark:text-chesscom-100'}`}>
+      <div className="flex min-w-0 items-center gap-2">
+        <span className={`h-3 w-3 rounded-full ${side === 'white' ? 'bg-white border border-chesscom-300' : 'bg-chesscom-900 border border-chesscom-700'}`} />
+        <span className="truncate text-sm font-semibold">{name}</span>
+        {elo != null && <span className={`font-mono text-xs tabular-nums ${highlighted ? 'text-chesscom-300' : 'text-chesscom-500'}`}>({elo})</span>}
       </div>
-      <div className="mt-2 flex items-center justify-between text-[11px] text-ink-400">
-        <span>{t('review.depth')}: {depth} · Elo is an estimate from this game</span>
-        <button onClick={onToggleDepth} className="btn-ghost px-2 py-0.5 text-[10px] uppercase tracking-wide">
-          <SettingsIcon className="h-3 w-3" /> depth
-        </button>
+      <div className="flex items-center gap-3">
+        <CapturedPieces fen={fen} side={side} />
+        {accuracy != null && (
+          <span className="font-mono text-sm font-semibold tabular-nums">{accuracy.toFixed(1)}<span className="text-xs opacity-70">%</span></span>
+        )}
       </div>
     </div>
+  );
+}
+
+function TabBtn({ active, onClick, icon: Icon, label }: { active: boolean; onClick: () => void; icon: React.ElementType; label: string }) {
+  return (
+    <button onClick={onClick} className={`relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${active ? 'text-chesscom-900 dark:text-chesscom-100' : 'text-chesscom-500 hover:text-chesscom-900 dark:hover:text-chesscom-100'}`}>
+      <Icon className="h-3.5 w-3.5" />
+      <span>{label}</span>
+      {active && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-gold-500" />}
+    </button>
   );
 }
 
@@ -365,7 +443,7 @@ function ExportRow({ pgn, fen, fileBase }: { pgn: string; fen: string; fileBase:
       setCopied(kind);
       setTimeout(() => setCopied(null), 1400);
     } catch {
-      // Clipboard API may be denied (e.g. insecure origin); silently no-op.
+      // Clipboard API may be denied; silently no-op.
     }
   }
 
@@ -380,11 +458,11 @@ function ExportRow({ pgn, fen, fileBase }: { pgn: string; fen: string; fileBase:
   return (
     <div className="card flex flex-wrap items-center gap-2 p-2 text-xs">
       <button onClick={() => copy('fen', fen)} className="btn-ghost px-2 py-1 text-xs" title="Copy FEN of current position">
-        {copied === 'fen' ? <Check className="h-3.5 w-3.5 text-accent-600" /> : <Copy className="h-3.5 w-3.5" />}
+        {copied === 'fen' ? <Check className="h-3.5 w-3.5 text-board-dark" /> : <Copy className="h-3.5 w-3.5" />}
         {copied === 'fen' ? t('common.copied') : `${t('common.copy')} FEN`}
       </button>
       <button onClick={() => copy('pgn', pgn)} className="btn-ghost px-2 py-1 text-xs" title="Copy full PGN">
-        {copied === 'pgn' ? <Check className="h-3.5 w-3.5 text-accent-600" /> : <Copy className="h-3.5 w-3.5" />}
+        {copied === 'pgn' ? <Check className="h-3.5 w-3.5 text-board-dark" /> : <Copy className="h-3.5 w-3.5" />}
         {copied === 'pgn' ? t('common.copied') : `${t('common.copy')} PGN`}
       </button>
       <button onClick={downloadPgn} className="btn-ghost px-2 py-1 text-xs" title="Download .pgn">
@@ -397,45 +475,18 @@ function ExportRow({ pgn, fen, fileBase }: { pgn: string; fen: string; fileBase:
 
 function AnalyzerSkeleton() {
   return (
-    <div className="mx-auto max-w-6xl animate-pulse">
-      <div className="mb-4 h-7 w-40 rounded bg-ink-200/70 dark:bg-ink-700/70" />
+    <div className="mx-auto max-w-7xl animate-pulse">
+      <div className="mb-4 h-7 w-40 rounded bg-chesscom-200/70 dark:bg-chesscom-700/70" />
       <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
         <div className="lg:flex-1 lg:max-w-[760px]">
-          <div className="aspect-square w-full rounded-xl bg-ink-200/70 dark:bg-ink-700/70" />
-          <div className="mt-3 h-12 rounded-xl bg-ink-200/70 dark:bg-ink-700/70" />
+          <div className="aspect-square w-full rounded-xl bg-chesscom-200/70 dark:bg-chesscom-700/70" />
+          <div className="mt-3 h-12 rounded-xl bg-chesscom-200/70 dark:bg-chesscom-700/70" />
         </div>
-        <div className="space-y-3 lg:w-[360px]">
-          <div className="h-24 rounded-xl bg-ink-200/70 dark:bg-ink-700/70" />
-          <div className="h-32 rounded-xl bg-ink-200/70 dark:bg-ink-700/70" />
-          <div className="h-48 rounded-xl bg-ink-200/70 dark:bg-ink-700/70" />
+        <div className="space-y-3 lg:w-[380px]">
+          <div className="h-24 rounded-xl bg-chesscom-200/70 dark:bg-chesscom-700/70" />
+          <div className="h-32 rounded-xl bg-chesscom-200/70 dark:bg-chesscom-700/70" />
+          <div className="h-48 rounded-xl bg-chesscom-200/70 dark:bg-chesscom-700/70" />
         </div>
-      </div>
-    </div>
-  );
-}
-
-function PlayerCell({ label, name, accuracy, elo, side }: { label: string; name: string; accuracy: number; elo: number | null; side: 'white' | 'black' }) {
-  const dot = side === 'white' ? 'bg-cream border border-ink-300' : 'bg-ink-900';
-  return (
-    <div className="rounded-lg bg-ink-100 px-3 py-2 dark:bg-ink-800">
-      <div className="flex items-center gap-2">
-        <span className={`h-3 w-3 rounded-full ${dot}`} />
-        <span className="text-xs text-ink-500">{label}</span>
-      </div>
-      <div className="mt-1 truncate text-sm font-medium">{name}</div>
-      <div className="mt-1 flex items-baseline gap-3">
-        <div>
-          <div className="text-[10px] uppercase tracking-wide text-ink-400">Accuracy</div>
-          <div className="font-mono text-base font-semibold tabular-nums">{fmtAccuracy(accuracy)}</div>
-        </div>
-        {elo != null && (
-          <div>
-            <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-ink-400">
-              <Trophy className="h-3 w-3" /> Est. Elo
-            </div>
-            <div className="font-mono text-base font-semibold tabular-nums">{elo}</div>
-          </div>
-        )}
       </div>
     </div>
   );

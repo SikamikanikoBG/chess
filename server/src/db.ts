@@ -79,6 +79,31 @@ const SCHEMA = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_challenges_to ON challenges(to_user_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_challenges_from ON challenges(from_user_id, status)`,
+  // Per-user-per-time-class Glicko-1 rating row. Bullet/blitz/rapid/daily are
+  // separate pools — a user has up to 4 rows in this table.
+  `CREATE TABLE IF NOT EXISTS ratings (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    time_class TEXT NOT NULL CHECK(time_class IN ('bullet','blitz','rapid','daily')),
+    rating REAL NOT NULL DEFAULT 1200,
+    rd REAL NOT NULL DEFAULT 350,
+    games_played INTEGER NOT NULL DEFAULT 0,
+    last_played_at TEXT,
+    PRIMARY KEY (user_id, time_class)
+  )`,
+  // Audit trail of rating changes — used by admin "mark unrated" reversal.
+  `CREATE TABLE IF NOT EXISTS rating_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    time_class TEXT NOT NULL,
+    rating_before REAL NOT NULL,
+    rating_after REAL NOT NULL,
+    rd_before REAL NOT NULL,
+    rd_after REAL NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_rating_history_user ON rating_history(user_id, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_rating_history_game ON rating_history(game_id)`,
 ];
 
 for (const stmt of SCHEMA) db.exec(stmt);
@@ -112,6 +137,30 @@ ensureColumn('games', 'last_move_at', 'TEXT');
 // at deploy time would be hostile for what's a transparent improvement.
 ensureColumn('sessions', 'last_active_at', `TEXT`);
 db.prepare(`UPDATE sessions SET last_active_at = datetime('now') WHERE last_active_at IS NULL`).run();
+
+// v4.0.0 chess.com-parity additions: rated PvP, ECO openings, performance
+// rating, prose cache. All idempotent — safe to deploy over an existing v3 DB.
+ensureColumn('games', 'rated', `INTEGER NOT NULL DEFAULT 1`);
+ensureColumn('games', 'time_class', `TEXT`);
+ensureColumn('games', 'eco', `TEXT`);
+ensureColumn('games', 'opening_name', `TEXT`);
+ensureColumn('games', 'user_rating_before', `REAL`);
+ensureColumn('games', 'user_rating_after', `REAL`);
+ensureColumn('games', 'opponent_rating_before', `REAL`);
+ensureColumn('games', 'opponent_rating_after', `REAL`);
+ensureColumn('games', 'user_rd_before', `REAL`);
+ensureColumn('games', 'user_rd_after', `REAL`);
+ensureColumn('analyses', 'performance_white', `INTEGER`);
+ensureColumn('analyses', 'performance_black', `INTEGER`);
+ensureColumn('analyses', 'key_moments_json', `TEXT`);
+ensureColumn('analyses', 'opening_eco', `TEXT`);
+ensureColumn('analyses', 'opening_name', `TEXT`);
+ensureColumn('analyses', 'phase_split_json', `TEXT`);
+// Cached AI-written Game Review prose (the chess.com Game Report).
+ensureColumn('analyses', 'prose_json', `TEXT`);
+ensureColumn('analyses', 'prose_version', `INTEGER NOT NULL DEFAULT 0`);
+ensureColumn('analyses', 'prose_lang', `TEXT`);
+ensureColumn('analyses', 'prose_audience', `TEXT`);
 
 // Cleanup expired sessions on startup
 db.prepare(`DELETE FROM sessions WHERE expires_at < datetime('now')`).run();

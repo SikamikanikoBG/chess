@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '../db.js';
 import { requireAuth } from '../auth/middleware.js';
 import { notifyUser } from '../ws/lobby.js';
+import { classifyTimeControl, defaultTimeControlFor } from '../chess/timeClass.js';
 
 const router = new Hono();
 router.use('*', requireAuth);
@@ -140,9 +141,15 @@ router.post('/:id/accept', (c) => {
   const externalId = `pvp-${id}-${Date.now()}`;
   const startingPgn = ''; // empty until first move
 
+  // Resolve a real "<base>+<inc>" string from the keyword time control. The
+  // legacy column stored just the keyword; v4 normalizes to the real format
+  // so post-game classification (and chesscom-style time_class) is unambiguous.
+  const tcClass = classifyTimeControl(row.time_control);
+  const tcString = tcClass ? defaultTimeControlFor(tcClass) : (row.time_control || 'untimed');
+
   const insertGame = db.prepare(`
-    INSERT INTO games (user_id, source, external_id, pgn, white, black, result, time_control, end_time, user_color, opponent_user_id)
-    VALUES (?, 'pvp', ?, ?, ?, ?, NULL, ?, NULL, ?, ?)
+    INSERT INTO games (user_id, source, external_id, pgn, white, black, result, time_control, end_time, user_color, opponent_user_id, rated, time_class)
+    VALUES (?, 'pvp', ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?)
   `);
 
   // White player's row
@@ -151,8 +158,9 @@ router.post('/:id/accept', (c) => {
   const whiteName = challengerColor === 'white' ? row.from_display_name! : row.to_display_name!;
   const blackName = challengerColor === 'white' ? row.to_display_name! : row.from_display_name!;
 
-  const r1 = insertGame.run(whitePlayerId, externalId, startingPgn, whiteName, blackName, row.time_control, 'white', blackPlayerId);
-  insertGame.run(blackPlayerId, externalId, startingPgn, whiteName, blackName, row.time_control, 'black', whitePlayerId);
+  const rated = tcClass ? 1 : 0; // untimed games are unrated
+  const r1 = insertGame.run(whitePlayerId, externalId, startingPgn, whiteName, blackName, tcString, 'white', blackPlayerId, rated, tcClass);
+  insertGame.run(blackPlayerId, externalId, startingPgn, whiteName, blackName, tcString, 'black', whitePlayerId, rated, tcClass);
   const gameId = Number(r1.lastInsertRowid);
 
   db.prepare(`UPDATE challenges SET status = 'accepted', game_id = ? WHERE id = ?`).run(gameId, id);

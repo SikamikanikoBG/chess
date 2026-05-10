@@ -12,6 +12,7 @@ import SettingsPage from './pages/Settings';
 import Play from './pages/Play';
 import Review from './pages/Review';
 import GameAnalyzer from './pages/GameAnalyzer';
+import Insights from './pages/Insights';
 import AdminUsers from './pages/admin/Users';
 import AdminSystem from './pages/admin/System';
 import IncomingChallengeModal from './components/IncomingChallengeModal';
@@ -119,6 +120,7 @@ export default function App() {
           <Route path="/play" element={<Play />} />
           <Route path="/review" element={<Review />} />
           <Route path="/review/:id" element={<GameAnalyzer />} />
+          <Route path="/insights" element={<Insights />} />
           <Route path="/settings" element={<SettingsPage />} />
           {user.role === 'admin' && <Route path="/admin/users" element={<AdminUsers />} />}
           {user.role === 'admin' && <Route path="/admin/system" element={<AdminSystem />} />}
