@@ -53,4 +53,6 @@ export interface AnalysisResult {
   moves: AnalyzedMove[];
   accuracy_white: number;
   accuracy_black: number;
+  estimated_elo_white: number | null;
+  estimated_elo_black: number | null;
 }

@@ -58,6 +58,8 @@ const SCHEMA = [
     depth INTEGER NOT NULL,
     accuracy_white REAL,
     accuracy_black REAL,
+    estimated_elo_white INTEGER,
+    estimated_elo_black INTEGER,
     moves_json TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
@@ -66,6 +68,16 @@ const SCHEMA = [
 ];
 
 for (const stmt of SCHEMA) db.exec(stmt);
+
+// Idempotent migrations for existing installs
+function ensureColumn(table: string, col: string, def: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === col)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+  }
+}
+ensureColumn('analyses', 'estimated_elo_white', 'INTEGER');
+ensureColumn('analyses', 'estimated_elo_black', 'INTEGER');
 
 // Cleanup expired sessions on startup
 db.prepare(`DELETE FROM sessions WHERE expires_at < datetime('now')`).run();

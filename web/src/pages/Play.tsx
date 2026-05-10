@@ -187,8 +187,8 @@ export default function Play() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <div className="grid gap-6 lg:grid-cols-[auto,1fr]">
-        <div>
+      <div className="grid gap-4 lg:grid-cols-[auto,1fr] lg:gap-6">
+        <div className="mx-auto w-full max-w-[560px] lg:mx-0">
           <ClockBar timeMs={userColor === 'white' ? blackMs : whiteMs} active={turn !== userColor} label={userColor === 'white' ? t('play.black') : t('play.white')} flip />
           <div className="my-2">
             <ChessBoard
@@ -198,7 +198,6 @@ export default function Play() {
               turnColor={turn}
               onMove={sendMove}
               arrows={hint ? [{ orig: hint.from as never, dest: hint.to as never, brush: 'paleGreen' }] : []}
-              size={520}
             />
           </div>
           <ClockBar timeMs={userColor === 'white' ? whiteMs : blackMs} active={turn === userColor} label={userColor === 'white' ? t('play.white') : t('play.black')} />

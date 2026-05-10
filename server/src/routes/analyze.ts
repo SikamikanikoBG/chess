@@ -4,7 +4,7 @@ import { Chess } from 'chess.js';
 import { db } from '../db.js';
 import { requireAuth } from '../auth/middleware.js';
 import { StockfishEngine } from '../chess/stockfish.js';
-import { classify, normalizeEval, cpToWinPct, moveAccuracy } from '../chess/classifier.js';
+import { classify, normalizeEval, cpToWinPct, moveAccuracy, estimateElo } from '../chess/classifier.js';
 import type { AnalysisResult, AnalyzedMove, Color } from '../types.js';
 
 const router = new Hono();
@@ -34,13 +34,17 @@ router.post('/', async (c) => {
       | undefined;
     if (existing && existing.depth >= depth) {
       const cached = db.prepare('SELECT * FROM analyses WHERE game_id = ?').get(game_id) as {
-        depth: number; accuracy_white: number; accuracy_black: number; moves_json: string;
+        depth: number; accuracy_white: number; accuracy_black: number;
+        estimated_elo_white: number | null; estimated_elo_black: number | null;
+        moves_json: string;
       };
       return c.json({
         analysis: {
           depth: cached.depth,
           accuracy_white: cached.accuracy_white,
           accuracy_black: cached.accuracy_black,
+          estimated_elo_white: cached.estimated_elo_white,
+          estimated_elo_black: cached.estimated_elo_black,
           moves: JSON.parse(cached.moves_json),
         } satisfies AnalysisResult,
         cached: true,
@@ -51,12 +55,13 @@ router.post('/', async (c) => {
   const result = await analyzePgn(game.pgn, depth);
 
   db.prepare(`
-    INSERT INTO analyses (game_id, depth, accuracy_white, accuracy_black, moves_json)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO analyses (game_id, depth, accuracy_white, accuracy_black, estimated_elo_white, estimated_elo_black, moves_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(game_id) DO UPDATE SET depth = excluded.depth,
       accuracy_white = excluded.accuracy_white, accuracy_black = excluded.accuracy_black,
+      estimated_elo_white = excluded.estimated_elo_white, estimated_elo_black = excluded.estimated_elo_black,
       moves_json = excluded.moves_json, created_at = datetime('now')
-  `).run(game_id, depth, result.accuracy_white, result.accuracy_black, JSON.stringify(result.moves));
+  `).run(game_id, depth, result.accuracy_white, result.accuracy_black, result.estimated_elo_white, result.estimated_elo_black, JSON.stringify(result.moves));
 
   return c.json({ analysis: result, cached: false });
 });
@@ -80,8 +85,8 @@ export async function analyzePgn(pgn: string, depth: number): Promise<AnalysisRe
   let prevEval = await engine.evaluate(replay.fen(), depth);
   let prevWhiteCp = normalizeEval(prevEval.cp, prevEval.mate, replay.turn());
 
-  let whiteAccSum = 0, whiteAccN = 0;
-  let blackAccSum = 0, blackAccN = 0;
+  let whiteAccSum = 0, whiteAccN = 0, whiteCplSum = 0;
+  let blackAccSum = 0, blackAccN = 0, blackCplSum = 0;
 
   for (let i = 0; i < history.length; i++) {
     const move = history[i];
@@ -124,11 +129,16 @@ export async function analyzePgn(pgn: string, depth: number): Promise<AnalysisRe
     const playerWinBefore = sideToMove === 'white' ? wpBefore : 100 - wpBefore;
     const playerWinAfter = sideToMove === 'white' ? wpAfter : 100 - wpAfter;
     const acc = moveAccuracy(playerWinBefore, playerWinAfter);
-    if (sideToMove === 'white') { whiteAccSum += acc; whiteAccN++; } else { blackAccSum += acc; blackAccN++; }
 
     const cpLoss = Math.max(0, Math.round(playerWinBefore - playerWinAfter) * 4);
     const isBest = bestUci === move.from + move.to + (move.promotion ?? '');
     const cls = classify(cpLoss, isBest);
+
+    if (sideToMove === 'white') {
+      whiteAccSum += acc; whiteAccN++; whiteCplSum += cpLoss;
+    } else {
+      blackAccSum += acc; blackAccN++; blackCplSum += cpLoss;
+    }
 
     moves.push({
       ply: i + 1,
@@ -151,11 +161,18 @@ export async function analyzePgn(pgn: string, depth: number): Promise<AnalysisRe
 
   engine.quit();
 
+  const accuracy_white = whiteAccN ? Math.round((whiteAccSum / whiteAccN) * 10) / 10 : 0;
+  const accuracy_black = blackAccN ? Math.round((blackAccSum / blackAccN) * 10) / 10 : 0;
+  const acplWhite = whiteAccN ? whiteCplSum / whiteAccN : 0;
+  const acplBlack = blackAccN ? blackCplSum / blackAccN : 0;
+
   return {
     depth,
     moves,
-    accuracy_white: whiteAccN ? Math.round((whiteAccSum / whiteAccN) * 10) / 10 : 0,
-    accuracy_black: blackAccN ? Math.round((blackAccSum / blackAccN) * 10) / 10 : 0,
+    accuracy_white,
+    accuracy_black,
+    estimated_elo_white: whiteAccN ? estimateElo(accuracy_white, acplWhite) : null,
+    estimated_elo_black: blackAccN ? estimateElo(accuracy_black, acplBlack) : null,
   };
 }
 

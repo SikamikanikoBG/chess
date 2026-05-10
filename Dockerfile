@@ -40,6 +40,9 @@ RUN npm install --omit=dev --workspace=server
 COPY --from=builder /app/server/dist ./server/dist
 COPY --from=builder /app/web/dist ./web/dist
 
+# CHANGELOG is read at runtime by /api/meta/changelog
+COPY CHANGELOG.md ./CHANGELOG.md
+
 # Persistent data lives here — mount a volume to keep DB across container restarts
 RUN mkdir -p /app/data && chown -R node:node /app/data
 VOLUME ["/app/data"]

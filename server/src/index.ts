@@ -12,6 +12,7 @@ import adminRoutes from './routes/admin.js';
 import gamesRoutes from './routes/games.js';
 import analyzeRoutes from './routes/analyze.js';
 import coachRoutes from './routes/coach.js';
+import metaRoutes from './routes/meta.js';
 import { attachPlayWebSocket } from './ws/play.js';
 
 const app = new Hono();
@@ -26,6 +27,7 @@ app.use('/api/*', cors({
 
 app.get('/api/health', (c) => c.json({ ok: true, time: new Date().toISOString() }));
 
+app.route('/api/meta', metaRoutes);
 app.route('/api/setup', setupRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/settings', settingsRoutes);

@@ -47,3 +47,14 @@ export function normalizeEval(
   // Engine reports from side-to-move's perspective; flip to white's perspective.
   return sideToMove === 'w' ? val : -val;
 }
+
+// Approximate Elo for a single game from accuracy% and average centipawn loss.
+// Two heuristics that disagree at extremes are averaged for stability.
+// Calibrated loosely against Lichess game data — a one-game estimate is noisy,
+// so this is meant as "ballpark playing strength for THIS particular game".
+export function estimateElo(accuracy: number, avgCpl: number): number {
+  const fromAcc = 400 + (accuracy - 50) * 38;
+  const fromCpl = 2800 / (1 + (Math.max(0, avgCpl) / 50));
+  const elo = (fromAcc + fromCpl) / 2;
+  return Math.round(Math.max(400, Math.min(2800, elo)));
+}

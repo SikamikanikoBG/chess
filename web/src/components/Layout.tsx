@@ -1,14 +1,29 @@
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { LogOut, Home, Swords, BookOpen, Settings as SettingsIcon, Users, Server } from 'lucide-react';
+import { LogOut, Home, Swords, BookOpen, Settings as SettingsIcon, Users, Server, Menu, X } from 'lucide-react';
 import { api } from '../api';
 import { useAuth } from '../state/auth';
 import { cn } from '../lib/utils';
+import ChangelogModal from './ChangelogModal';
 
 export default function Layout() {
   const { t, i18n } = useTranslation();
   const { user, refresh } = useAuth();
   const nav = useNavigate();
+  const location = useLocation();
+  const [navOpen, setNavOpen] = useState(false);
+  const [showChangelog, setShowChangelog] = useState(false);
+  const [version, setVersion] = useState<string>('');
+
+  useEffect(() => {
+    api.get<{ version: string }>('/api/meta')
+      .then((d) => setVersion(d.version))
+      .catch(() => setVersion(''));
+  }, []);
+
+  // Auto-close mobile drawer on route change
+  useEffect(() => { setNavOpen(false); }, [location.pathname]);
 
   async function logout() {
     await api.post('/api/auth/logout');
@@ -36,9 +51,9 @@ export default function Layout() {
     );
   }
 
-  return (
-    <div className="flex min-h-screen">
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-ink-200 bg-cream p-4 dark:border-ink-800 dark:bg-ink-900 md:flex">
+  function NavContent() {
+    return (
+      <>
         <NavLink to="/" className="mb-6 flex items-center gap-2 px-2">
           <span className="text-2xl">♞</span>
           <div>
@@ -47,7 +62,7 @@ export default function Layout() {
           </div>
         </NavLink>
         <nav className="space-y-1">
-          <NavItem to="/" icon={Home} label={t('home.greeting', { name: '' }).replace('!', '').replace(',', '').trim() || 'Home'} />
+          <NavItem to="/" icon={Home} label={t('home.playTitle').split(' ')[0] === 'Play' ? 'Home' : 'Начало'} />
           <NavItem to="/play" icon={Swords} label={t('home.playTitle')} />
           <NavItem to="/review" icon={BookOpen} label={t('home.reviewTitle')} />
           <NavItem to="/settings" icon={SettingsIcon} label={t('common.settings')} />
@@ -81,21 +96,58 @@ export default function Layout() {
             <LogOut className="h-4 w-4" />
             {t('common.logout')}
           </button>
+          {version && (
+            <button
+              onClick={() => setShowChangelog(true)}
+              className="block w-full text-center text-[11px] text-ink-400 hover:text-ink-600 dark:hover:text-ink-200"
+              title="View changelog"
+            >
+              v{version}
+            </button>
+          )}
         </div>
+      </>
+    );
+  }
+
+  return (
+    <div className="flex min-h-screen">
+      {/* Desktop sidebar */}
+      <aside className="hidden w-60 shrink-0 flex-col border-r border-ink-200 bg-cream p-4 dark:border-ink-800 dark:bg-ink-900 md:flex">
+        <NavContent />
       </aside>
+
+      {/* Mobile drawer */}
+      {navOpen && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setNavOpen(false)} />
+          <aside className="fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-cream p-4 dark:bg-ink-900 md:hidden">
+            <button onClick={() => setNavOpen(false)} className="btn-ghost mb-2 self-end p-1.5">
+              <X className="h-5 w-5" />
+            </button>
+            <NavContent />
+          </aside>
+        </>
+      )}
+
       <main className="min-w-0 flex-1">
         {/* Mobile header */}
-        <header className="flex items-center justify-between border-b border-ink-200 bg-cream px-4 py-3 dark:border-ink-800 dark:bg-ink-900 md:hidden">
+        <header className="flex items-center justify-between border-b border-ink-200 bg-cream px-3 py-2 dark:border-ink-800 dark:bg-ink-900 md:hidden">
+          <button onClick={() => setNavOpen(true)} className="btn-ghost p-2">
+            <Menu className="h-5 w-5" />
+          </button>
           <NavLink to="/" className="flex items-center gap-2">
-            <span className="text-2xl">♞</span>
+            <span className="text-xl">♞</span>
             <span className="font-semibold">{t('app.name')}</span>
           </NavLink>
           <button onClick={logout} className="btn-ghost p-2"><LogOut className="h-4 w-4" /></button>
         </header>
-        <div className="p-6">
+        <div className="p-3 sm:p-6">
           <Outlet />
         </div>
       </main>
+
+      {showChangelog && <ChangelogModal onClose={() => setShowChangelog(false)} />}
     </div>
   );
 }

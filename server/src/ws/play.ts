@@ -245,9 +245,9 @@ async function endGame(ws: WebSocket, session: GameSession, result: '1-0' | '0-1
     try {
       const analysis = await analyzePgn(pgn, 14);
       db.prepare(`
-        INSERT INTO analyses (game_id, depth, accuracy_white, accuracy_black, moves_json)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(gameId, 14, analysis.accuracy_white, analysis.accuracy_black, JSON.stringify(analysis.moves));
+        INSERT INTO analyses (game_id, depth, accuracy_white, accuracy_black, estimated_elo_white, estimated_elo_black, moves_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(gameId, 14, analysis.accuracy_white, analysis.accuracy_black, analysis.estimated_elo_white, analysis.estimated_elo_black, JSON.stringify(analysis.moves));
     } catch (err) {
       console.error('[auto-analyze]', err);
     }

@@ -1,25 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Volume2, VolumeX } from 'lucide-react';
+import { Sparkles, Volume2, VolumeX, Pause, Play } from 'lucide-react';
 import { useAuth } from '../state/auth';
 import { speak, cancel as cancelSpeak } from '../lib/tts';
 
 interface Props {
   systemConfigured: boolean;
-  // pass-through factory: returns POST body for /api/coach/explain or /api/coach/hint
   request: (() => { url: string; body: Record<string, unknown> }) | null;
+  /** When true, auto-fetches whenever `triggerKey` changes (debounced). */
   autoPlay?: boolean;
-  triggerKey?: string | number; // changes → re-fetch (for always-on coach)
+  /** Changes to this value re-trigger the request in autoPlay mode. */
+  triggerKey?: string | number;
+  /** Debounce in ms before firing in autoPlay mode (default 600). */
+  debounceMs?: number;
+  /** Compact rendering for tight spaces. */
+  compact?: boolean;
 }
 
-export default function CoachPanel({ systemConfigured, request, autoPlay, triggerKey }: Props) {
+export default function CoachPanel({ systemConfigured, request, autoPlay, triggerKey, debounceMs = 600, compact }: Props) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
+  const [muted, setMuted] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const timerRef = useRef<number | null>(null);
 
   async function ask() {
     if (!request) return;
@@ -66,7 +73,7 @@ export default function CoachPanel({ systemConfigured, request, autoPlay, trigge
       if ((e as Error).name !== 'AbortError') setError((e as Error).message);
     } finally {
       setBusy(false);
-      if (autoPlay && acc.trim() && user?.profile.tts_enabled) {
+      if (autoPlay && acc.trim() && user?.profile.tts_enabled && !muted) {
         playTts(acc);
       }
     }
@@ -85,11 +92,25 @@ export default function CoachPanel({ systemConfigured, request, autoPlay, trigge
     if (u) u.onend = () => setSpeaking(false);
   }
 
-  // Always-on coach: re-fetch when triggerKey changes
+  function toggleMute() {
+    if (muted) { setMuted(false); return; }
+    setMuted(true);
+    abortRef.current?.abort();
+    cancelSpeak(); setSpeaking(false); setBusy(false);
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+  }
+
+  // Always-on mode: re-fetch (debounced) when triggerKey changes
   useEffect(() => {
-    if (autoPlay && request && triggerKey !== undefined) void ask();
+    if (!autoPlay || !request || muted) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => { void ask(); }, debounceMs);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [triggerKey]);
+  }, [triggerKey, autoPlay, muted]);
+
+  // On unmount, cancel everything
+  useEffect(() => () => { abortRef.current?.abort(); cancelSpeak(); }, []);
 
   if (!systemConfigured) {
     return (
@@ -100,28 +121,38 @@ export default function CoachPanel({ systemConfigured, request, autoPlay, trigge
   }
 
   return (
-    <div className="card p-4">
+    <div className={compact ? 'card p-3' : 'card p-4'}>
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2 font-semibold">
           <Sparkles className="h-4 w-4 text-accent-500" />
           {t('coach.title')}
         </div>
-        <div className="flex gap-1">
+        <div className="flex items-center gap-1">
           {!autoPlay && request && (
             <button onClick={ask} disabled={busy} className="btn-secondary text-xs">
               {t('coach.askExplain', { cls: '?' })}
             </button>
           )}
-          {text && (
+          {autoPlay && (
+            <button
+              onClick={toggleMute}
+              className="btn-ghost p-1.5"
+              title={muted ? 'Resume coach' : 'Mute coach'}
+            >
+              {muted ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+            </button>
+          )}
+          {text && !muted && (
             speaking
               ? <button onClick={() => { cancelSpeak(); setSpeaking(false); }} className="btn-ghost p-1.5"><VolumeX className="h-4 w-4" /></button>
               : <button onClick={() => playTts()} className="btn-ghost p-1.5"><Volume2 className="h-4 w-4" /></button>
           )}
         </div>
       </div>
-      {busy && !text && <div className="text-sm text-ink-500">{t('coach.thinking')}</div>}
-      {text && <div className="whitespace-pre-wrap text-sm leading-relaxed text-ink-800 dark:text-ink-100">{text}</div>}
-      {error && <div className="text-sm text-bad">{error}</div>}
+      {muted && <div className="text-sm text-ink-400 italic">— muted —</div>}
+      {!muted && busy && !text && <div className="text-sm text-ink-500">{t('coach.thinking')}</div>}
+      {!muted && text && <div className="whitespace-pre-wrap text-sm leading-relaxed text-ink-800 dark:text-ink-100">{text}</div>}
+      {!muted && error && <div className="text-sm text-bad">{error}</div>}
     </div>
   );
 }

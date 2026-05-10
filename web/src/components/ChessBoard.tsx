@@ -14,7 +14,7 @@ interface Props {
   lastMove?: [Key, Key];
   highlightSquares?: Partial<Record<Key, string>>; // square -> color (e.g. for arrows/highlights)
   arrows?: { orig: Key; dest: Key; brush?: string }[];
-  size?: number;
+  size?: number; // explicit size in px; if omitted, board fills its container (square)
 }
 
 export default function ChessBoard({
@@ -26,7 +26,7 @@ export default function ChessBoard({
   lastMove,
   highlightSquares,
   arrows,
-  size = 480,
+  size,
 }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
   const apiRef = useRef<CgApi | null>(null);
@@ -94,7 +94,12 @@ export default function ChessBoard({
     }
   }, [fen, orientation, turnColor, lastMove, movable, arrows, highlightSquares]);
 
-  return <div ref={ref} style={{ width: size, height: size }} />;
+  // If `size` is provided, lock to those dimensions; otherwise fill the parent
+  // as a square (parent should be the sizing authority — e.g. aspect-square).
+  const style: React.CSSProperties = size != null
+    ? { width: size, height: size }
+    : { width: '100%', aspectRatio: '1 / 1' };
+  return <div ref={ref} style={style} />;
 }
 
 function legalDests(fen: string): Map<Key, Key[]> {
