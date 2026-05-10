@@ -28,54 +28,66 @@ cg-board {
   overflow: hidden;
 }
 
-/* Board themes — override chessground's default brown by replacing cg-board's
-   background with a CSS-generated checkerboard. Each square is 12.5% of the
-   board (1/8). Two diagonal-gradient pairs offset by 12.5% create the pattern. */
+/* Board themes — overlay an inline-SVG checkerboard on top of cg-board. The
+   SVG describes one 2×2 unit (one light, one dark square in each corner);
+   tiled at 25% × 25% it yields a clean 8×8 axis-aligned board. */
 .board-theme-wood cg-board {
-  background-color: #f0d9b5;
-  background-image:
-    linear-gradient(45deg, #b58863 25%, transparent 25%, transparent 75%, #b58863 75%),
-    linear-gradient(45deg, #b58863 25%, transparent 25%, transparent 75%, #b58863 75%);
-  background-position: 0 0, 12.5% 12.5%;
-  background-size: 25% 25%;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 2 2' shape-rendering='crispEdges'><rect width='2' height='2' fill='%23f0d9b5'/><rect x='1' width='1' height='1' fill='%23b58863'/><rect y='1' width='1' height='1' fill='%23b58863'/></svg>") !important;
+  background-size: 25% 25% !important;
+  background-repeat: repeat !important;
+  background-position: 0 0 !important;
 }
 .board-theme-green cg-board {
-  background-color: #eeeed2;
-  background-image:
-    linear-gradient(45deg, #769656 25%, transparent 25%, transparent 75%, #769656 75%),
-    linear-gradient(45deg, #769656 25%, transparent 25%, transparent 75%, #769656 75%);
-  background-position: 0 0, 12.5% 12.5%;
-  background-size: 25% 25%;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 2 2' shape-rendering='crispEdges'><rect width='2' height='2' fill='%23eeeed2'/><rect x='1' width='1' height='1' fill='%23769656'/><rect y='1' width='1' height='1' fill='%23769656'/></svg>") !important;
+  background-size: 25% 25% !important;
+  background-repeat: repeat !important;
+  background-position: 0 0 !important;
 }
 .board-theme-blue cg-board {
-  background-color: #dee3e6;
-  background-image:
-    linear-gradient(45deg, #788a94 25%, transparent 25%, transparent 75%, #788a94 75%),
-    linear-gradient(45deg, #788a94 25%, transparent 25%, transparent 75%, #788a94 75%);
-  background-position: 0 0, 12.5% 12.5%;
-  background-size: 25% 25%;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 2 2' shape-rendering='crispEdges'><rect width='2' height='2' fill='%23dee3e6'/><rect x='1' width='1' height='1' fill='%23788a94'/><rect y='1' width='1' height='1' fill='%23788a94'/></svg>") !important;
+  background-size: 25% 25% !important;
+  background-repeat: repeat !important;
+  background-position: 0 0 !important;
 }
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-500/40 disabled:opacity-50 disabled:pointer-events-none;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-accent-500/50 focus-visible:ring-offset-cream dark:focus-visible:ring-offset-ink-900 disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98];
   }
-  .btn-primary { @apply btn bg-ink-900 text-cream hover:bg-ink-800 dark:bg-cream dark:text-ink-900 dark:hover:bg-ink-100; }
-  .btn-secondary { @apply btn bg-ink-100 text-ink-900 hover:bg-ink-200 dark:bg-ink-800 dark:text-cream dark:hover:bg-ink-700; }
+  .btn-primary { @apply btn bg-ink-900 text-cream hover:bg-ink-800 dark:bg-cream dark:text-ink-900 dark:hover:bg-white; }
+  .btn-secondary { @apply btn bg-ink-100 text-ink-800 hover:bg-ink-200 dark:bg-ink-700 dark:text-cream dark:hover:bg-ink-600; }
   .btn-ghost { @apply btn text-ink-700 hover:bg-ink-100 dark:text-ink-200 dark:hover:bg-ink-800; }
-  .btn-danger { @apply btn bg-bad text-white hover:opacity-90; }
+  .btn-danger { @apply btn bg-bad text-white hover:bg-red-600; }
 
   .card {
-    @apply rounded-2xl bg-white border border-ink-200 shadow-soft dark:bg-ink-800 dark:border-ink-700;
+    @apply rounded-2xl bg-white border border-ink-200/80 shadow-soft dark:bg-ink-800/80 dark:border-ink-700/60 backdrop-blur-sm;
+  }
+
+  .card-hover {
+    @apply card transition-all duration-200 hover:shadow-lift hover:-translate-y-0.5 hover:border-ink-300/60 dark:hover:border-ink-600/80;
   }
 
   .input {
-    @apply block w-full rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm placeholder:text-ink-400 focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 focus:outline-none dark:bg-ink-900 dark:border-ink-700 dark:text-cream;
+    @apply block w-full rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm text-ink-800 placeholder:text-ink-400 transition-colors focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 focus:outline-none dark:bg-ink-900 dark:border-ink-700 dark:text-cream dark:placeholder:text-ink-400;
   }
 
-  .label { @apply text-xs font-medium uppercase tracking-wide text-ink-500 dark:text-ink-300; }
+  .label { @apply text-xs font-medium uppercase tracking-wider text-ink-500 dark:text-ink-300; }
 
   .badge { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium; }
+
+  /* Section header used inside cards */
+  .section-header {
+    @apply flex items-center gap-3 border-b border-ink-100 bg-ink-50/60 px-5 py-3 dark:border-ink-700 dark:bg-ink-900/40;
+  }
+  .section-icon {
+    @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-lg;
+  }
+  .section-title { @apply font-semibold leading-tight; }
+  .section-desc  { @apply text-xs text-ink-500; }
+
+  /* Page header shorthand */
+  .page-h1 { @apply text-3xl font-bold tracking-tight; }
+  .page-sub { @apply mt-1 text-sm text-ink-500; }
 }
 
 /* Scrollbar polish */

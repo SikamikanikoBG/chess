@@ -5,6 +5,8 @@ import { useAuth } from '../state/auth';
 import { speak, cancel as cancelSpeak } from '../lib/tts';
 import { renderMarkdown } from '../lib/markdown';
 
+const MUTE_STORAGE_KEY = 'coach.mute';
+
 interface Props {
   systemConfigured: boolean;
   request: (() => { url: string; body: Record<string, unknown> }) | null;
@@ -25,7 +27,15 @@ export default function CoachPanel({ systemConfigured, request, autoPlay, trigge
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
-  const [muted, setMuted] = useState(false);
+  // Mute state persists across mount/unmount (jumping to ply 0 unmounts the
+  // panel; without persistence, the user's mute would silently reset).
+  const [muted, setMutedState] = useState<boolean>(() => {
+    try { return localStorage.getItem(MUTE_STORAGE_KEY) === '1'; } catch { return false; }
+  });
+  const setMuted = (v: boolean) => {
+    setMutedState(v);
+    try { localStorage.setItem(MUTE_STORAGE_KEY, v ? '1' : '0'); } catch { /* ignore */ }
+  };
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<number | null>(null);
 
@@ -62,7 +72,10 @@ export default function CoachPanel({ systemConfigured, request, autoPlay, trigge
           buf = buf.slice(nl + 2);
           for (const line of block.split('\n')) {
             if (line.startsWith('data:')) {
-              acc += line.slice(5).trimStart();
+              // Per SSE spec, strip exactly ONE leading space after `data:`.
+              // Using trimStart() here would eat token-leading spaces sent by
+              // the LLM, collapsing output into one long word.
+              acc += line.slice(5).replace(/^ /, '');
               setText(acc);
             } else if (line.startsWith('event: error')) {
               setError('coach error');
