@@ -25,9 +25,10 @@ bin/
 *.log
 npm-debug.log*
 
-# Editor / OS
+# Editor / OS / agent scratch
 .vscode/
 .idea/
+.claude/
 .DS_Store
 Thumbs.db
 
