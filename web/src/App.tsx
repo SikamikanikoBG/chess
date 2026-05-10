@@ -27,6 +27,22 @@ export default function App() {
     }
   }, [user, i18n]);
 
+  // Apply site theme (light / dark / auto) — toggles `dark` class on <html>
+  useEffect(() => {
+    const theme = user?.profile?.site_theme ?? 'auto';
+    const mql = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      const wantDark = theme === 'dark' || (theme === 'auto' && mql.matches);
+      document.documentElement.classList.toggle('dark', wantDark);
+    };
+    apply();
+    if (theme === 'auto') {
+      mql.addEventListener('change', apply);
+      return () => mql.removeEventListener('change', apply);
+    }
+    return undefined;
+  }, [user?.profile?.site_theme]);
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center text-ink-500">

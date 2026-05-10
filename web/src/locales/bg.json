@@ -138,13 +138,15 @@
     "result": "Резултат"
   },
   "classification": {
+    "brilliant": "Брилянтен",
     "best": "Най-добър",
     "excellent": "Отличен",
     "good": "Добър",
     "book": "Теория",
     "inaccuracy": "Неточност",
     "mistake": "Грешка",
-    "blunder": "Блъндер"
+    "blunder": "Блъндер",
+    "miss": "Пропуск"
   },
   "coach": {
     "title": "Треньор",
@@ -186,7 +188,17 @@
     "ttsPreview": "Чуй гласа",
     "ttsPreviewText": "Hello, I am your chess coach.",
     "ttsPreviewTextBg": "Здрасти, аз съм твоят шах треньор.",
-    "saved": "Запазено"
+    "saved": "Запазено",
+    "appearance": "Външен вид",
+    "siteTheme": "Тема на сайта",
+    "siteThemeLight": "Светла",
+    "siteThemeDark": "Тъмна",
+    "siteThemeAuto": "Автоматична (система)",
+    "boardTheme": "Тема на дъската",
+    "boardWood": "Дърво",
+    "boardGreen": "Зелена",
+    "boardBlue": "Синя",
+    "adminHint": "Ти си администратор — използвай секция Администратор в страничната лента, за да управляваш потребителите и системните настройки (Ollama, Stockfish)."
   },
   "admin": {
     "users": "Потребители",

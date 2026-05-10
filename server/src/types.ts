@@ -4,7 +4,7 @@ export type Audience = 'kid' | 'beginner' | 'intermediate' | 'advanced';
 export type CoachBehavior = 'silent' | 'on_demand' | 'always_on_pedagogical';
 export type Difficulty = 'kid' | 'beginner' | 'easy' | 'medium' | 'hard' | 'master' | 'stockfish';
 export type Color = 'white' | 'black';
-export type Classification = 'best' | 'excellent' | 'good' | 'book' | 'inaccuracy' | 'mistake' | 'blunder';
+export type Classification = 'brilliant' | 'best' | 'excellent' | 'good' | 'book' | 'inaccuracy' | 'mistake' | 'blunder' | 'miss';
 
 export interface User {
   id: number;

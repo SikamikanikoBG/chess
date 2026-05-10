@@ -4,7 +4,7 @@ import { Chess } from 'chess.js';
 import { db } from '../db.js';
 import { requireAuth } from '../auth/middleware.js';
 import { StockfishEngine } from '../chess/stockfish.js';
-import { classify, normalizeEval, cpToWinPct, moveAccuracy, estimateElo } from '../chess/classifier.js';
+import { classify, refineClassification, normalizeEval, cpToWinPct, moveAccuracy, estimateElo } from '../chess/classifier.js';
 import type { AnalysisResult, AnalyzedMove, Color } from '../types.js';
 
 const router = new Hono();
@@ -132,7 +132,19 @@ export async function analyzePgn(pgn: string, depth: number): Promise<AnalysisRe
 
     const cpLoss = Math.max(0, Math.round(playerWinBefore - playerWinAfter) * 4);
     const isBest = bestUci === move.from + move.to + (move.promotion ?? '');
-    const cls = classify(cpLoss, isBest);
+    const baseCls = classify(cpLoss, isBest);
+    const playerEvalBeforeCp = sideToMove === 'white' ? prevWhiteCp : -prevWhiteCp;
+    const playerEvalAfterCp = sideToMove === 'white' ? nextWhiteCp : -nextWhiteCp;
+    const cls = refineClassification({
+      base: baseCls,
+      isBest,
+      cpLoss,
+      fenBefore,
+      fenAfter,
+      sideToMove,
+      playerEvalBeforeCp,
+      playerEvalAfterCp,
+    });
 
     if (sideToMove === 'white') {
       whiteAccSum += acc; whiteAccN++; whiteCplSum += cpLoss;

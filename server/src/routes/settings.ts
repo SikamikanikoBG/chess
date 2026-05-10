@@ -18,8 +18,9 @@ const profileSchema = z.object({
   tts_voice: z.string().nullable().optional(),
   tts_rate: z.number().min(0.5).max(2).optional(),
   tts_pitch: z.number().min(0).max(2).optional(),
-  board_theme: z.string().optional(),
+  board_theme: z.enum(['wood', 'green', 'blue']).optional(),
   piece_set: z.string().optional(),
+  site_theme: z.enum(['light', 'dark', 'auto']).optional(),
 });
 
 router.get('/profile', (c) => {

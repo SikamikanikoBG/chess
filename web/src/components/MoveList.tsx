@@ -3,6 +3,7 @@ import { cn } from '../lib/utils';
 import type { Classification } from '../types';
 
 const CLASS_BG: Record<Classification, string> = {
+  brilliant: 'bg-move-brilliant/20 text-move-brilliant',
   best: 'bg-move-best/20 text-move-best',
   excellent: 'bg-move-excellent/20 text-move-excellent',
   good: 'bg-move-good/20 text-move-good',
@@ -10,9 +11,11 @@ const CLASS_BG: Record<Classification, string> = {
   inaccuracy: 'bg-move-inaccuracy/20 text-move-inaccuracy',
   mistake: 'bg-move-mistake/20 text-move-mistake',
   blunder: 'bg-move-blunder/20 text-move-blunder',
+  miss: 'bg-move-miss/20 text-move-miss',
 };
 
 const CLASS_GLYPH: Record<Classification, string> = {
+  brilliant: '!!',
   best: '★',
   excellent: '✓',
   good: '·',
@@ -20,6 +23,7 @@ const CLASS_GLYPH: Record<Classification, string> = {
   inaccuracy: '?!',
   mistake: '?',
   blunder: '??',
+  miss: '✗',
 };
 
 interface Move { ply: number; san: string; classification?: Classification }

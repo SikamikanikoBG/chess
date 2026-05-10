@@ -15,7 +15,8 @@ export function moveAccuracy(winBefore: number, winAfter: number): number {
   return Math.max(0, Math.min(100, acc));
 }
 
-// Classify by centipawn loss (lower = better).
+// Classify by centipawn loss (lower = better). Brilliant/Miss are applied as
+// overrides in `refineClassification` after material/eval context is known.
 export function classify(cpLoss: number, isBest: boolean): Classification {
   if (isBest) return 'best';
   if (cpLoss <= 10) return 'best';
@@ -25,6 +26,63 @@ export function classify(cpLoss: number, isBest: boolean): Classification {
   if (cpLoss <= 250) return 'mistake';
   return 'blunder';
 }
+
+// Compute material totals (in pawn-equivalents) for both sides from a FEN.
+// Excludes king (uncountable). Returns { white, black } scores.
+export function materialFromFen(fen: string): { white: number; black: number } {
+  const board = fen.split(' ')[0] ?? '';
+  const values: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+  let white = 0;
+  let black = 0;
+  for (const ch of board) {
+    if (ch === '/' || /\d/.test(ch)) continue;
+    const v = values[ch.toLowerCase()];
+    if (!v) continue;
+    if (ch === ch.toLowerCase()) black += v;
+    else white += v;
+  }
+  return { white, black };
+}
+
+// After the basic classification, upgrade to Brilliant or downgrade to Miss
+// based on context. `playerEvalAfterCp` is from THIS player's perspective.
+export function refineClassification(args: {
+  base: Classification;
+  isBest: boolean;
+  cpLoss: number;
+  fenBefore: string;
+  fenAfter: string;
+  sideToMove: 'white' | 'black';
+  playerEvalBeforeCp: number;
+  playerEvalAfterCp: number;
+}): Classification {
+  const { base, isBest, cpLoss, fenBefore, fenAfter, sideToMove, playerEvalBeforeCp, playerEvalAfterCp } = args;
+
+  // BRILLIANT: engine's top choice that sacrifices material but the position
+  // still holds (or is winning). Skip very early-game where book theory dominates.
+  const moveNumber = Number(fenBefore.split(' ')[5] ?? '1');
+  if ((isBest || cpLoss <= 10) && moveNumber > 4) {
+    const matBefore = materialFromFen(fenBefore);
+    const matAfter = materialFromFen(fenAfter);
+    const playerMatBefore = sideToMove === 'white' ? matBefore.white : matBefore.black;
+    const playerMatAfter = sideToMove === 'white' ? matAfter.white : matAfter.black;
+    const sacrificed = playerMatBefore - playerMatAfter;
+    if (sacrificed >= 3 && playerEvalAfterCp >= -50) return 'brilliant';
+  }
+
+  // MISS: a mistake or blunder in a position where the player was clearly winning.
+  // Threshold: had >= +200cp, dropped by >= 100cp.
+  if ((base === 'mistake' || base === 'blunder') && playerEvalBeforeCp >= 200) {
+    return 'miss';
+  }
+
+  return base;
+}
+
+// Classification weights for scoring/sorting — useful in stats display.
+export const CLASSIFICATION_ORDER: Classification[] = [
+  'brilliant', 'best', 'excellent', 'good', 'book', 'inaccuracy', 'mistake', 'blunder', 'miss',
+];
 
 // Convert mate score to a large centipawn equivalent for comparisons.
 // Use ±10000 - 10*moves so closer mates dominate.

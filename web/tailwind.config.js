@@ -13,6 +13,7 @@ export default {
         bad:    '#ef4444',
         // Move classification colors
         move: {
+          brilliant: '#22d3ee',  // cyan — chess.com uses teal-ish
           best: '#10b981',
           excellent: '#34d399',
           good: '#a3e635',
@@ -20,6 +21,7 @@ export default {
           inaccuracy: '#fbbf24',
           mistake: '#f97316',
           blunder: '#ef4444',
+          miss: '#a855f7',       // purple — distinct from blunder
         },
       },
       fontFamily: {

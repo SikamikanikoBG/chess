@@ -25,8 +25,9 @@ const SCHEMA = [
     tts_voice TEXT,
     tts_rate REAL NOT NULL DEFAULT 1.0,
     tts_pitch REAL NOT NULL DEFAULT 1.0,
-    board_theme TEXT NOT NULL DEFAULT 'green',
-    piece_set TEXT NOT NULL DEFAULT 'cburnett'
+    board_theme TEXT NOT NULL DEFAULT 'wood',
+    piece_set TEXT NOT NULL DEFAULT 'cburnett',
+    site_theme TEXT NOT NULL DEFAULT 'auto'
   )`,
   `CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
@@ -78,6 +79,7 @@ function ensureColumn(table: string, col: string, def: string) {
 }
 ensureColumn('analyses', 'estimated_elo_white', 'INTEGER');
 ensureColumn('analyses', 'estimated_elo_black', 'INTEGER');
+ensureColumn('profiles', 'site_theme', `TEXT NOT NULL DEFAULT 'auto'`);
 
 // Cleanup expired sessions on startup
 db.prepare(`DELETE FROM sessions WHERE expires_at < datetime('now')`).run();

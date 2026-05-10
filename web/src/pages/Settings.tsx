@@ -39,10 +39,28 @@ export default function Settings() {
       tts_pitch: form.tts_pitch,
       board_theme: form.board_theme,
       piece_set: form.piece_set,
+      site_theme: form.site_theme,
     });
     await i18n.changeLanguage(form.language);
     await refresh();
     setSaved(true); setTimeout(() => setSaved(false), 1500);
+  }
+
+  function BoardSwatch({ theme }: { theme: 'wood' | 'green' | 'blue' }) {
+    const colors = {
+      wood:  { l: '#f0d9b5', d: '#b58863' },
+      green: { l: '#eeeed2', d: '#769656' },
+      blue:  { l: '#dee3e6', d: '#788a94' },
+    }[theme];
+    return (
+      <div className="grid h-10 grid-cols-4 grid-rows-4 overflow-hidden rounded">
+        {Array.from({ length: 16 }).map((_, i) => {
+          const x = i % 4; const y = Math.floor(i / 4);
+          const isDark = (x + y) % 2 === 1;
+          return <div key={i} style={{ background: isDark ? colors.d : colors.l }} />;
+        })}
+      </div>
+    );
   }
 
   const langVoices = voices.filter((v) => v.lang.toLowerCase().startsWith(form.language === 'bg' ? 'bg' : 'en'));
@@ -94,6 +112,42 @@ export default function Settings() {
           </div>
         </div>
       </section>
+
+      <section className="card p-5">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-ink-500">{t('settings.appearance')}</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="label mb-1 block">{t('settings.siteTheme')}</label>
+            <div className="grid grid-cols-3 gap-2">
+              {(['light','dark','auto'] as const).map((th) => (
+                <button key={th} onClick={() => set('site_theme', th)}
+                  className={`btn text-xs ${form.site_theme === th ? 'btn-primary' : 'btn-secondary'}`}>
+                  {t(`settings.siteTheme${th[0]!.toUpperCase()}${th.slice(1)}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="label mb-1 block">{t('settings.boardTheme')}</label>
+            <div className="grid grid-cols-3 gap-2">
+              {(['wood','green','blue'] as const).map((th) => (
+                <button key={th} onClick={() => set('board_theme', th)}
+                  className={`relative overflow-hidden rounded-xl border p-2 text-xs font-medium transition-colors
+                    ${form.board_theme === th ? 'border-ink-900 dark:border-cream' : 'border-ink-200 hover:border-ink-300 dark:border-ink-700'}`}>
+                  <BoardSwatch theme={th} />
+                  <div className="mt-2">{t(`settings.board${th[0]!.toUpperCase()}${th.slice(1)}`)}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {user?.role === 'admin' && (
+        <div className="rounded-xl border border-accent-500/30 bg-accent-50 px-4 py-3 text-sm text-accent-700 dark:bg-accent-700/10 dark:text-accent-300">
+          {t('settings.adminHint')}
+        </div>
+      )}
 
       <section className="card p-5">
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-ink-500">{t('coach.title')}</h2>

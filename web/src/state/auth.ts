@@ -6,6 +6,9 @@ export type Language = 'en' | 'bg';
 export type Audience = 'kid' | 'beginner' | 'intermediate' | 'advanced';
 export type CoachBehavior = 'silent' | 'on_demand' | 'always_on_pedagogical';
 
+export type BoardTheme = 'wood' | 'green' | 'blue';
+export type SiteTheme = 'light' | 'dark' | 'auto';
+
 export interface Profile {
   user_id: number;
   display_name: string;
@@ -18,8 +21,9 @@ export interface Profile {
   tts_voice: string | null;
   tts_rate: number;
   tts_pitch: number;
-  board_theme: string;
+  board_theme: BoardTheme;
   piece_set: string;
+  site_theme: SiteTheme;
 }
 
 export interface User {

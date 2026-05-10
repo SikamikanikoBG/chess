@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Sparkles, Volume2, VolumeX, Pause, Play } from 'lucide-react';
 import { useAuth } from '../state/auth';
 import { speak, cancel as cancelSpeak } from '../lib/tts';
+import { renderMarkdown } from '../lib/markdown';
 
 interface Props {
   systemConfigured: boolean;
@@ -109,7 +110,6 @@ export default function CoachPanel({ systemConfigured, request, autoPlay, trigge
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggerKey, autoPlay, muted]);
 
-  // On unmount, cancel everything
   useEffect(() => () => { abortRef.current?.abort(); cancelSpeak(); }, []);
 
   if (!systemConfigured) {
@@ -121,13 +121,13 @@ export default function CoachPanel({ systemConfigured, request, autoPlay, trigge
   }
 
   return (
-    <div className={compact ? 'card p-3' : 'card p-4'}>
-      <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-2 font-semibold">
-          <Sparkles className="h-4 w-4 text-accent-500" />
-          {t('coach.title')}
+    <div className={`card overflow-hidden ${compact ? 'p-3' : 'p-4'}`}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2 font-semibold">
+          <Sparkles className="h-4 w-4 shrink-0 text-accent-500" />
+          <span className="truncate">{t('coach.title')}</span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           {!autoPlay && request && (
             <button onClick={ask} disabled={busy} className="btn-secondary text-xs">
               {t('coach.askExplain', { cls: '?' })}
@@ -149,9 +149,15 @@ export default function CoachPanel({ systemConfigured, request, autoPlay, trigge
           )}
         </div>
       </div>
-      {muted && <div className="text-sm text-ink-400 italic">— muted —</div>}
+      {muted && <div className="text-sm italic text-ink-400">— muted —</div>}
       {!muted && busy && !text && <div className="text-sm text-ink-500">{t('coach.thinking')}</div>}
-      {!muted && text && <div className="whitespace-pre-wrap text-sm leading-relaxed text-ink-800 dark:text-ink-100">{text}</div>}
+      {!muted && text && (
+        <div
+          className="coach-md min-w-0 break-words text-sm text-ink-800 dark:text-ink-100"
+          style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
+        />
+      )}
       {!muted && error && <div className="text-sm text-bad">{error}</div>}
     </div>
   );

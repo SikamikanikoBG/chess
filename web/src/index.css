@@ -28,6 +28,34 @@ cg-board {
   overflow: hidden;
 }
 
+/* Board themes — override chessground's default brown by replacing cg-board's
+   background with a CSS-generated checkerboard. Each square is 12.5% of the
+   board (1/8). Two diagonal-gradient pairs offset by 12.5% create the pattern. */
+.board-theme-wood cg-board {
+  background-color: #f0d9b5;
+  background-image:
+    linear-gradient(45deg, #b58863 25%, transparent 25%, transparent 75%, #b58863 75%),
+    linear-gradient(45deg, #b58863 25%, transparent 25%, transparent 75%, #b58863 75%);
+  background-position: 0 0, 12.5% 12.5%;
+  background-size: 25% 25%;
+}
+.board-theme-green cg-board {
+  background-color: #eeeed2;
+  background-image:
+    linear-gradient(45deg, #769656 25%, transparent 25%, transparent 75%, #769656 75%),
+    linear-gradient(45deg, #769656 25%, transparent 25%, transparent 75%, #769656 75%);
+  background-position: 0 0, 12.5% 12.5%;
+  background-size: 25% 25%;
+}
+.board-theme-blue cg-board {
+  background-color: #dee3e6;
+  background-image:
+    linear-gradient(45deg, #788a94 25%, transparent 25%, transparent 75%, #788a94 75%),
+    linear-gradient(45deg, #788a94 25%, transparent 25%, transparent 75%, #788a94 75%);
+  background-position: 0 0, 12.5% 12.5%;
+  background-size: 25% 25%;
+}
+
 @layer components {
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-500/40 disabled:opacity-50 disabled:pointer-events-none;

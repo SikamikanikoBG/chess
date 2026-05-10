@@ -2,6 +2,8 @@
 // installed Windows SAPI voices, which include Bulgarian (Microsoft Ivan) when
 // the BG language pack is installed.
 
+import { stripMarkdown } from './markdown';
+
 export function getVoices(): SpeechSynthesisVoice[] {
   if (typeof speechSynthesis === 'undefined') return [];
   return speechSynthesis.getVoices();
@@ -23,9 +25,11 @@ export function voicesForLang(lang: 'en' | 'bg'): SpeechSynthesisVoice[] {
 export interface SpeakOpts { voice?: string | null; rate?: number; pitch?: number; lang?: 'en' | 'bg' }
 
 export function speak(text: string, opts: SpeakOpts = {}): SpeechSynthesisUtterance | null {
-  if (typeof speechSynthesis === 'undefined' || !text.trim()) return null;
+  if (typeof speechSynthesis === 'undefined') return null;
+  const clean = stripMarkdown(text);
+  if (!clean) return null;
   speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
+  const u = new SpeechSynthesisUtterance(clean);
   u.rate = opts.rate ?? 1;
   u.pitch = opts.pitch ?? 1;
   if (opts.voice) {

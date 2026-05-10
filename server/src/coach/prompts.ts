@@ -48,6 +48,7 @@ export function explainMovePrompt(ctx: MoveContext, language: Language): string 
 
   const klass = (() => {
     const map: Record<Classification, [string, string]> = {
+      brilliant: ['a brilliant move (sacrifice)', 'брилянтен ход (жертва)'],
       best: ['best move', 'най-добър ход'],
       excellent: ['excellent', 'отличен ход'],
       good: ['good', 'добър ход'],
@@ -55,6 +56,7 @@ export function explainMovePrompt(ctx: MoveContext, language: Language): string 
       inaccuracy: ['an inaccuracy', 'неточност'],
       mistake: ['a mistake', 'грешка'],
       blunder: ['a blunder', 'голяма грешка (блъндер)'],
+      miss: ['a miss (you had a much stronger move)', 'пропуск (имаше много по-силен ход)'],
     };
     const [en, bg] = map[ctx.classification];
     return language === 'bg'

@@ -138,13 +138,15 @@
     "result": "Result"
   },
   "classification": {
+    "brilliant": "Brilliant",
     "best": "Best",
     "excellent": "Excellent",
     "good": "Good",
     "book": "Book",
     "inaccuracy": "Inaccuracy",
     "mistake": "Mistake",
-    "blunder": "Blunder"
+    "blunder": "Blunder",
+    "miss": "Miss"
   },
   "coach": {
     "title": "Coach",
@@ -186,7 +188,17 @@
     "ttsPreview": "Preview voice",
     "ttsPreviewText": "Hello, I am your chess coach.",
     "ttsPreviewTextBg": "Здрасти, аз съм твоят шах треньор.",
-    "saved": "Saved"
+    "saved": "Saved",
+    "appearance": "Appearance",
+    "siteTheme": "Site theme",
+    "siteThemeLight": "Light",
+    "siteThemeDark": "Dark",
+    "siteThemeAuto": "Auto (system)",
+    "boardTheme": "Board theme",
+    "boardWood": "Wood",
+    "boardGreen": "Green",
+    "boardBlue": "Blue",
+    "adminHint": "You're an admin — use the Admin section in the sidebar to manage users and system-wide settings (Ollama, Stockfish)."
   },
   "admin": {
     "users": "Users",

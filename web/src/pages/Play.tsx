@@ -190,7 +190,7 @@ export default function Play() {
       <div className="grid gap-4 lg:grid-cols-[auto,1fr] lg:gap-6">
         <div className="mx-auto w-full max-w-[560px] lg:mx-0">
           <ClockBar timeMs={userColor === 'white' ? blackMs : whiteMs} active={turn !== userColor} label={userColor === 'white' ? t('play.black') : t('play.white')} flip />
-          <div className="my-2">
+          <div className={`my-2 board-theme-${user?.profile.board_theme ?? 'wood'}`}>
             <ChessBoard
               fen={fen}
               orientation={userColor}
