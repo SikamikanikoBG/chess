@@ -1,0 +1,97 @@
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { db } from '../db.js';
+import { requireAuth } from '../auth/middleware.js';
+import { fetchRecentGames, getPlayer, type ChessComGame } from '../chess/chesscom.js';
+
+const router = new Hono();
+router.use('*', requireAuth);
+
+router.get('/', (c) => {
+  const user = c.get('user');
+  const limit = Math.min(Number(c.req.query('limit') ?? 50), 200);
+  const rows = db.prepare(`
+    SELECT g.id, g.source, g.external_id, g.white, g.black, g.result, g.time_control, g.end_time, g.user_color,
+           CASE WHEN a.game_id IS NOT NULL THEN 1 ELSE 0 END as analyzed,
+           a.accuracy_white, a.accuracy_black
+    FROM games g LEFT JOIN analyses a ON a.game_id = g.id
+    WHERE g.user_id = ?
+    ORDER BY g.end_time DESC NULLS LAST, g.id DESC
+    LIMIT ?
+  `).all(user.id, limit);
+  return c.json({ games: rows });
+});
+
+router.get('/:id', (c) => {
+  const user = c.get('user');
+  const id = Number(c.req.param('id'));
+  const game = db.prepare('SELECT * FROM games WHERE id = ? AND user_id = ?').get(id, user.id);
+  if (!game) return c.json({ error: 'not_found' }, 404);
+  const analysis = db.prepare('SELECT * FROM analyses WHERE game_id = ?').get(id);
+  return c.json({ game, analysis });
+});
+
+router.delete('/:id', (c) => {
+  const user = c.get('user');
+  const id = Number(c.req.param('id'));
+  const r = db.prepare('DELETE FROM games WHERE id = ? AND user_id = ?').run(id, user.id);
+  if (r.changes === 0) return c.json({ error: 'not_found' }, 404);
+  return c.json({ ok: true });
+});
+
+const importSchema = z.object({
+  username: z.string().trim().min(1).max(40).optional(),
+  limit: z.number().int().min(1).max(200).default(20),
+});
+
+router.post('/import/chesscom', async (c) => {
+  const user = c.get('user');
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = importSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: 'invalid_input' }, 400);
+  const username = parsed.data.username ?? user.profile.chesscom_username;
+  if (!username) return c.json({ error: 'no_chesscom_username' }, 400);
+
+  const player = await getPlayer(username);
+  if (!player) return c.json({ error: 'player_not_found' }, 404);
+
+  const games = await fetchRecentGames(username, parsed.data.limit);
+  const stmt = db.prepare(`
+    INSERT INTO games (user_id, source, external_id, pgn, white, black, result, time_control, end_time, user_color)
+    VALUES (?, 'chesscom', ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, source, external_id) DO NOTHING
+  `);
+
+  const lcUsername = username.toLowerCase();
+  let imported = 0;
+  for (const g of games) {
+    const userColor: 'white' | 'black' | null =
+      g.white.username.toLowerCase() === lcUsername ? 'white' :
+      g.black.username.toLowerCase() === lcUsername ? 'black' : null;
+    const result = resultFor(g, userColor);
+    const r = stmt.run(
+      user.id,
+      g.url,
+      g.pgn,
+      g.white.username,
+      g.black.username,
+      result,
+      g.time_control,
+      new Date(g.end_time * 1000).toISOString(),
+      userColor,
+    );
+    if (r.changes > 0) imported++;
+  }
+
+  return c.json({ imported, total: games.length });
+});
+
+function resultFor(g: ChessComGame, userColor: 'white' | 'black' | null): string {
+  if (!userColor) return g.white.result;
+  const r = userColor === 'white' ? g.white.result : g.black.result;
+  if (r === 'win') return 'win';
+  if (['agreed', 'repetition', 'stalemate', 'insufficient', '50move', 'timevsinsufficient'].includes(r)) return 'draw';
+  return 'loss';
+}
+
+export default router;

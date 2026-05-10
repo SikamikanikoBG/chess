@@ -1,0 +1,24 @@
+{
+  "name": "chess",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted chess platform — Game Review for Chess.com games, play vs Stockfish bots, AI coach with multilingual support.",
+  "license": "MIT",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,magenta \"npm:dev -w server\" \"npm:dev -w web\"",
+    "build": "npm run build -w server && npm run build -w web",
+    "start": "npm run start -w server",
+    "setup": "powershell -ExecutionPolicy Bypass -File ./setup.ps1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

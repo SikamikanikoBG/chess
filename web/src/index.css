@@ -1,0 +1,56 @@
+@import 'chessground/assets/chessground.base.css';
+@import 'chessground/assets/chessground.brown.css';
+@import 'chessground/assets/chessground.cburnett.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light dark;
+}
+
+html, body, #root { height: 100%; }
+body {
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: #faf6ee;
+  color: #0e1320;
+}
+
+.dark body {
+  background: #0e1320;
+  color: #f8fafc;
+}
+
+/* Polished chessground tweaks */
+cg-board {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-500/40 disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-primary { @apply btn bg-ink-900 text-cream hover:bg-ink-800 dark:bg-cream dark:text-ink-900 dark:hover:bg-ink-100; }
+  .btn-secondary { @apply btn bg-ink-100 text-ink-900 hover:bg-ink-200 dark:bg-ink-800 dark:text-cream dark:hover:bg-ink-700; }
+  .btn-ghost { @apply btn text-ink-700 hover:bg-ink-100 dark:text-ink-200 dark:hover:bg-ink-800; }
+  .btn-danger { @apply btn bg-bad text-white hover:opacity-90; }
+
+  .card {
+    @apply rounded-2xl bg-white border border-ink-200 shadow-soft dark:bg-ink-800 dark:border-ink-700;
+  }
+
+  .input {
+    @apply block w-full rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm placeholder:text-ink-400 focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 focus:outline-none dark:bg-ink-900 dark:border-ink-700 dark:text-cream;
+  }
+
+  .label { @apply text-xs font-medium uppercase tracking-wide text-ink-500 dark:text-ink-300; }
+
+  .badge { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium; }
+}
+
+/* Scrollbar polish */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(100, 116, 139, 0.3); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.5); }
