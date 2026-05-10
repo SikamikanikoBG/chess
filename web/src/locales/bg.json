@@ -1,7 +1,8 @@
 {
   "app": {
-    "name": "Шах",
-    "tagline": "Играй. Анализирай. Учи."
+    "name": "Patzer",
+    "tagline": "Твоят личен Chess.com.",
+    "home": "Начало"
   },
   "common": {
     "save": "Запази",
@@ -27,10 +28,13 @@
     "connected": "Свързано",
     "disconnected": "Прекъснато",
     "optional": "(незадължително)",
-    "required": "Задължително"
+    "required": "Задължително",
+    "copy": "Копирай",
+    "copied": "Копирано",
+    "download": "Изтегли"
   },
   "setup": {
-    "title": "Добре дошъл",
+    "title": "Добре дошъл в Patzer",
     "subtitle": "Нека настроим твоя шах сървър. Това е еднократен помощник.",
     "step1": "Създай админ акаунт",
     "step2": "Свържи Ollama (за AI Треньора)",
@@ -42,7 +46,8 @@
     "ollamaConnected": "Свързано — намерени {{count}} модела",
     "ollamaFailed": "Не успях да се свържа: {{error}}",
     "finish": "Завърши настройката",
-    "creating": "Създава…"
+    "creating": "Създава…",
+    "passwordHint": "Поне 10 символа."
   },
   "login": {
     "title": "Добре дошъл отново",
@@ -128,7 +133,15 @@
     "playAgain": "Играй отново",
     "review": "Анализирай тази партия",
     "saving": "Запазва партията…",
-    "savedAndAnalyzing": "Партията е запазена — анализира във фон"
+    "savedAndAnalyzing": "Партията е запазена — анализира във фон",
+    "rewindFirst": "В началото",
+    "rewindPrev": "Предишен ход",
+    "rewindNext": "Следващ ход",
+    "rewindLive": "Към текущата",
+    "browsingPast": "Преглед на минала позиция",
+    "overPrompt": "Какво следва?",
+    "keepLooking": "Само погледни дъската",
+    "showResult": "Натисни за резултат"
   },
   "review": {
     "title": "Анализ на партия",
@@ -152,10 +165,12 @@
   },
   "classification": {
     "brilliant": "Брилянтен",
+    "great": "Страхотен",
     "best": "Най-добър",
     "excellent": "Отличен",
     "good": "Добър",
     "book": "Теория",
+    "forced": "Принуден",
     "inaccuracy": "Неточност",
     "mistake": "Грешка",
     "blunder": "Блъндер",

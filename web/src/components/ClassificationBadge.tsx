@@ -1,50 +1,47 @@
-import type { Classification } from '../types';
 import { cn } from '../lib/utils';
-
-const CLASS_BG: Record<Classification, string> = {
-  brilliant: 'bg-move-brilliant text-white ring-2 ring-white/40',
-  best: 'bg-move-best text-white ring-2 ring-white/40',
-  excellent: 'bg-move-excellent text-white ring-2 ring-white/40',
-  good: 'bg-move-good text-ink-900 ring-2 ring-white/40',
-  book: 'bg-move-book text-white ring-2 ring-white/40',
-  inaccuracy: 'bg-move-inaccuracy text-white ring-2 ring-white/40',
-  mistake: 'bg-move-mistake text-white ring-2 ring-white/40',
-  blunder: 'bg-move-blunder text-white ring-2 ring-white/40',
-  miss: 'bg-move-miss text-white ring-2 ring-white/40',
-};
-
-const CLASS_GLYPH: Record<Classification, string> = {
-  brilliant: '!!', best: '★', excellent: '✓', good: '·', book: '📖',
-  inaccuracy: '?!', mistake: '?', blunder: '??', miss: '✗',
-};
+import { styleFor, GLYPH_SVG } from '../lib/classification';
 
 interface Props {
-  classification: Classification;
+  classification: string;
   square: string;       // e.g. "e4"
   orientation?: 'white' | 'black';
   size?: 'sm' | 'md';
 }
 
-// Renders a small badge anchored to a board square. Must be placed inside a
-// position:relative parent that's the same size as the chessboard.
+// Floating pictogram badge anchored to the corner of a board square. Must be
+// placed inside a position:relative parent that's exactly the size of the
+// chessboard. The badge hangs slightly above and to the right of the square so
+// it doesn't obscure the piece silhouette underneath.
 export default function ClassificationBadge({ classification, square, orientation = 'white', size = 'md' }: Props) {
+  const style = styleFor(classification);
+  if (!style) return null;
   if (square.length < 2) return null;
-  const file = square.charCodeAt(0) - 97;            // a=0..h=7
-  const rank = parseInt(square[1]!, 10) - 1;          // 1=0..8=7
+
+  const file = square.charCodeAt(0) - 97;        // a=0..h=7
+  const rank = parseInt(square[1]!, 10) - 1;     // 1=0..8=7
   if (Number.isNaN(file) || Number.isNaN(rank)) return null;
 
   const flip = orientation === 'black';
   const colPct = (flip ? 7 - file : file) * 12.5;
   const rowPct = (flip ? rank : 7 - rank) * 12.5;
 
-  const sizeCls = size === 'sm' ? 'h-5 w-5 text-[10px]' : 'h-7 w-7 text-xs';
+  const px = size === 'sm' ? 22 : 30;
+  const left = `calc(${colPct}% + 12.5% - ${px * 0.65}px)`;
+  const top  = `calc(${rowPct}% - ${px * 0.35}px)`;
 
   return (
-    <div className="pointer-events-none absolute z-10"
-      style={{ left: `calc(${colPct}% + 12.5% - ${size === 'sm' ? 10 : 14}px)`, top: `calc(${rowPct}% - ${size === 'sm' ? 6 : 10}px)` }}>
-      <div className={cn('flex items-center justify-center rounded-full font-bold shadow-lg', sizeCls, CLASS_BG[classification])}
-        title={classification}>
-        {CLASS_GLYPH[classification]}
+    <div className="pointer-events-none absolute z-10 animate-fade-in" style={{ left, top }}>
+      <div
+        className={cn(
+          'flex items-center justify-center rounded-full text-white shadow-lg ring-2 ring-white/80 dark:ring-ink-900/80',
+          style.bgClass,
+        )}
+        style={{ width: px, height: px }}
+        title={classification}
+      >
+        <svg viewBox="0 0 24 24" width={px * 0.7} height={px * 0.7} aria-hidden="true">
+          {GLYPH_SVG[style.glyph]}
+        </svg>
       </div>
     </div>
   );

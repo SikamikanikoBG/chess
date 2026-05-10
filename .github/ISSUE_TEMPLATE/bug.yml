@@ -1,0 +1,57 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, plus what you expected to happen.
+      placeholder: When I open Game Review for a chess.com game, the eval graph is empty…
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to Game Review
+        2. Click "Analyze" on a game
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Patzer version
+      description: Click the version pill in the bottom-left of the sidebar (or check `package.json`).
+      placeholder: 3.0.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How are you running Patzer?
+      options:
+        - Docker (docker compose)
+        - Docker (docker run)
+        - Local dev (npm run dev)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: host-os
+    attributes:
+      label: Host OS / arch
+      placeholder: Debian 12 on Raspberry Pi 5 / Windows 11 / macOS 14 (M2)
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Server logs (`docker logs patzer`) and/or browser console output.
+      render: shell

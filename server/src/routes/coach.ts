@@ -46,13 +46,14 @@ router.post('/explain', async (c) => {
     pv_san: parsed.data.pv_san,
     history: parsed.data.history,
     user_perspective: parsed.data.user_perspective,
-  }, lang);
+  }, lang, aud);
 
   return streamSSE(c, async (stream) => {
     try {
       await chatStream(
         [{ role: 'system', content: sys }, { role: 'user', content: usr }],
         async (chunk) => { await stream.writeSSE({ data: chunk }); },
+        { temperature: 0.3 }, // low — we want the LLM to render facts faithfully, not invent
       );
     } catch (err) {
       await stream.writeSSE({ event: 'error', data: err instanceof Error ? err.message : String(err) });
@@ -84,6 +85,7 @@ router.post('/hint', async (c) => {
       await chatStream(
         [{ role: 'system', content: sys }, { role: 'user', content: usr }],
         async (chunk) => { await stream.writeSSE({ data: chunk }); },
+        { temperature: 0.3 },
       );
     } catch (err) {
       await stream.writeSSE({ event: 'error', data: err instanceof Error ? err.message : String(err) });

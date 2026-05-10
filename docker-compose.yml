@@ -1,13 +1,13 @@
 services:
-  chess:
+  patzer:
     build: .
-    image: chess:latest
-    container_name: chess
+    image: patzer:latest
+    container_name: patzer
     restart: unless-stopped
     ports:
       - "${HOST_PORT:-8800}:8800"
     volumes:
-      - chess-data:/app/data
+      - patzer-data:/app/data
     environment:
       - NODE_ENV=production
       # PORT/HOST/DB_PATH/STOCKFISH_PATH have sensible defaults baked into the image.
@@ -17,6 +17,12 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    # Without these caps the json-file driver grows logs unbounded on the host.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
-  chess-data:
+  patzer-data:

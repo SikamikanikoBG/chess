@@ -92,13 +92,35 @@ function ensureColumn(table: string, col: string, def: string) {
 }
 ensureColumn('analyses', 'estimated_elo_white', 'INTEGER');
 ensureColumn('analyses', 'estimated_elo_black', 'INTEGER');
+// scoring_version lets us silently re-run analyses when the classifier or
+// elo curve changes. Default 1 = "pre-versioned" = stale until re-analyzed.
+ensureColumn('analyses', 'scoring_version', `INTEGER NOT NULL DEFAULT 1`);
 ensureColumn('profiles', 'site_theme', `TEXT NOT NULL DEFAULT 'auto'`);
 ensureColumn('profiles', 'blunder_warning', `INTEGER NOT NULL DEFAULT 0`);
 ensureColumn('profiles', 'sound_enabled', `INTEGER NOT NULL DEFAULT 1`);
 ensureColumn('games', 'opponent_user_id', `INTEGER REFERENCES users(id) ON DELETE SET NULL`);
+// PvP clock persistence — without these a refresh during a blitz game silently
+// reset both clocks to the time control's initial. last_move_at is needed so
+// the reconnecting peer doesn't get free time on their opponent's account.
+ensureColumn('games', 'white_time_ms', 'INTEGER');
+ensureColumn('games', 'black_time_ms', 'INTEGER');
+ensureColumn('games', 'last_move_at', 'TEXT');
+// Idle-expiry guard for sessions: an absolute 30-day expiry alone is too long
+// for a stolen cookie. We now also reject sessions with >7 days of inactivity.
+// SQLite refuses non-constant DEFAULTs on ALTER ADD COLUMN, so we add the
+// column nullable and backfill existing rows to "now" — kicking everyone out
+// at deploy time would be hostile for what's a transparent improvement.
+ensureColumn('sessions', 'last_active_at', `TEXT`);
+db.prepare(`UPDATE sessions SET last_active_at = datetime('now') WHERE last_active_at IS NULL`).run();
 
 // Cleanup expired sessions on startup
 db.prepare(`DELETE FROM sessions WHERE expires_at < datetime('now')`).run();
+// Sweep stale challenges on startup. Pending challenges older than 15 minutes
+// are noise — most senders have closed the tab and the recipient never saw it.
+// A read-time filter (in challenges.ts) handles fresh installs; the sweep keeps
+// the table from growing unbounded.
+db.prepare(`UPDATE challenges SET status = 'expired'
+            WHERE status = 'pending' AND created_at < datetime('now','-15 minutes')`).run();
 
 export function getSetting(key: string): string | null {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;

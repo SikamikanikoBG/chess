@@ -4,7 +4,7 @@ import { Chess } from 'chess.js';
 import { db } from '../db.js';
 import { requireAuth } from '../auth/middleware.js';
 import { StockfishEngine } from '../chess/stockfish.js';
-import { classify, refineClassification, normalizeEval, cpToWinPct, moveAccuracy, estimateElo } from '../chess/classifier.js';
+import { classifyByWpDrop, refineClassification, normalizeEval, cpToWinPct, cpLossForPly, moveAccuracy, estimateElo, SCORING_VERSION } from '../chess/classifier.js';
 import type { AnalysisResult, AnalyzedMove, Color } from '../types.js';
 
 const router = new Hono();
@@ -15,6 +15,11 @@ const schema = z.object({
   depth: z.number().int().min(8).max(22).default(16),
   force: z.boolean().default(false),
 });
+
+// Single-flight guard: only one analysis per user at a time. Without this, a
+// double-click on "Analyze" — or two browser tabs — spawns two concurrent
+// Stockfish processes against the same PGN, doubling CPU and racing inserts.
+const inflight = new Map<number, Promise<unknown>>();
 
 router.post('/', async (c) => {
   const user = c.get('user');
@@ -28,11 +33,13 @@ router.post('/', async (c) => {
     | undefined;
   if (!game) return c.json({ error: 'not_found' }, 404);
 
+  if (inflight.has(user.id)) return c.json({ error: 'already_analyzing' }, 429);
+
   if (!force) {
-    const existing = db.prepare('SELECT depth FROM analyses WHERE game_id = ?').get(game_id) as
-      | { depth: number }
+    const existing = db.prepare('SELECT depth, scoring_version FROM analyses WHERE game_id = ?').get(game_id) as
+      | { depth: number; scoring_version: number }
       | undefined;
-    if (existing && existing.depth >= depth) {
+    if (existing && existing.depth >= depth && existing.scoring_version >= SCORING_VERSION) {
       const cached = db.prepare('SELECT * FROM analyses WHERE game_id = ?').get(game_id) as {
         depth: number; accuracy_white: number; accuracy_black: number;
         estimated_elo_white: number | null; estimated_elo_black: number | null;
@@ -52,18 +59,27 @@ router.post('/', async (c) => {
     }
   }
 
-  const result = await analyzePgn(game.pgn, depth);
+  const work = (async () => {
+    const result = await analyzePgn(game.pgn, depth);
+    db.prepare(`
+      INSERT INTO analyses (game_id, depth, accuracy_white, accuracy_black, estimated_elo_white, estimated_elo_black, moves_json, scoring_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(game_id) DO UPDATE SET depth = excluded.depth,
+        accuracy_white = excluded.accuracy_white, accuracy_black = excluded.accuracy_black,
+        estimated_elo_white = excluded.estimated_elo_white, estimated_elo_black = excluded.estimated_elo_black,
+        moves_json = excluded.moves_json, scoring_version = excluded.scoring_version,
+        created_at = datetime('now')
+    `).run(game_id, depth, result.accuracy_white, result.accuracy_black, result.estimated_elo_white, result.estimated_elo_black, JSON.stringify(result.moves), SCORING_VERSION);
+    return result;
+  })();
 
-  db.prepare(`
-    INSERT INTO analyses (game_id, depth, accuracy_white, accuracy_black, estimated_elo_white, estimated_elo_black, moves_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(game_id) DO UPDATE SET depth = excluded.depth,
-      accuracy_white = excluded.accuracy_white, accuracy_black = excluded.accuracy_black,
-      estimated_elo_white = excluded.estimated_elo_white, estimated_elo_black = excluded.estimated_elo_black,
-      moves_json = excluded.moves_json, created_at = datetime('now')
-  `).run(game_id, depth, result.accuracy_white, result.accuracy_black, result.estimated_elo_white, result.estimated_elo_black, JSON.stringify(result.moves));
-
-  return c.json({ analysis: result, cached: false });
+  inflight.set(user.id, work);
+  try {
+    const result = await work;
+    return c.json({ analysis: result, cached: false });
+  } finally {
+    inflight.delete(user.id);
+  }
 });
 
 export async function analyzePgn(pgn: string, depth: number): Promise<AnalysisResult> {
@@ -81,8 +97,9 @@ export async function analyzePgn(pgn: string, depth: number): Promise<AnalysisRe
   const replay = new Chess();
   const moves: AnalyzedMove[] = [];
 
-  // Pre-evaluate starting position
-  let prevEval = await engine.evaluate(replay.fen(), depth);
+  // Pre-evaluate starting position with MultiPV=3 so we can detect "Great"
+  // (only-good-move) and gap-aware "Brilliant" via the second-best candidate.
+  let prevEval = await engine.evaluateMulti(replay.fen(), depth, 3);
   let prevWhiteCp = normalizeEval(prevEval.cp, prevEval.mate, replay.turn());
 
   let whiteAccSum = 0, whiteAccN = 0, whiteCplSum = 0;
@@ -114,27 +131,42 @@ export async function analyzePgn(pgn: string, depth: number): Promise<AnalysisRe
       }
     }
 
+    // Count legal moves BEFORE applying the played move so we can detect Forced.
+    const legalMoveCount = new Chess(fenBefore).moves().length;
+
+    // Build the candidate list from this player's perspective. prevEval was
+    // computed for fenBefore, so each candidate's cp/mate is from side-to-move
+    // (== this player) directly.
+    const candidatePlayerCps: number[] = prevEval.candidates.map((cand) => {
+      if (cand.mate !== null) return cand.mate > 0 ? 10000 - cand.mate * 10 : -10000 - cand.mate * 10;
+      return cand.cp ?? 0;
+    });
+
     // Apply played move
     replay.move({ from: move.from, to: move.to, promotion: move.promotion });
     const fenAfter = replay.fen();
 
-    // Evaluate position after
-    const nextEval = await engine.evaluate(fenAfter, depth);
+    // Evaluate position after — keep MultiPV so the next iteration's prevEval
+    // has candidates ready for that ply's refinement.
+    const nextEval = await engine.evaluateMulti(fenAfter, depth, 3);
     const nextWhiteCp = normalizeEval(nextEval.cp, nextEval.mate, replay.turn());
 
     const wpBefore = cpToWinPct(prevWhiteCp);
     const wpAfter = cpToWinPct(nextWhiteCp);
 
-    // Per-move accuracy from this player's perspective
+    // Per-move accuracy and cp_loss from this player's perspective
     const playerWinBefore = sideToMove === 'white' ? wpBefore : 100 - wpBefore;
     const playerWinAfter = sideToMove === 'white' ? wpAfter : 100 - wpAfter;
     const acc = moveAccuracy(playerWinBefore, playerWinAfter);
 
-    const cpLoss = Math.max(0, Math.round(playerWinBefore - playerWinAfter) * 4);
-    const isBest = bestUci === move.from + move.to + (move.promotion ?? '');
-    const baseCls = classify(cpLoss, isBest);
     const playerEvalBeforeCp = sideToMove === 'white' ? prevWhiteCp : -prevWhiteCp;
     const playerEvalAfterCp = sideToMove === 'white' ? nextWhiteCp : -nextWhiteCp;
+    // Mate-aware centipawn loss — see cpLossForPly. Plain cp diff would treat
+    // a forced ±M3 → ∓M5 line as a 1000-cp blunder per ply, polluting ACPL.
+    const cpLoss = cpLossForPly(playerEvalBeforeCp, playerEvalAfterCp);
+    const wpDrop = Math.max(0, playerWinBefore - playerWinAfter);
+    const isBest = bestUci === move.from + move.to + (move.promotion ?? '');
+    const baseCls = classifyByWpDrop(wpDrop, cpLoss, isBest);
     const cls = refineClassification({
       base: baseCls,
       isBest,
@@ -144,6 +176,9 @@ export async function analyzePgn(pgn: string, depth: number): Promise<AnalysisRe
       sideToMove,
       playerEvalBeforeCp,
       playerEvalAfterCp,
+      ply: i + 1,
+      legalMoveCount,
+      candidatePlayerCps,
     });
 
     if (sideToMove === 'white') {
@@ -171,7 +206,7 @@ export async function analyzePgn(pgn: string, depth: number): Promise<AnalysisRe
     prevWhiteCp = nextWhiteCp;
   }
 
-  engine.quit();
+  await engine.quit();
 
   const accuracy_white = whiteAccN ? Math.round((whiteAccSum / whiteAccN) * 10) / 10 : 0;
   const accuracy_black = blackAccN ? Math.round((blackAccSum / blackAccN) * 10) / 10 : 0;

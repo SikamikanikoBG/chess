@@ -255,10 +255,14 @@ export default function Settings() {
         </div>
       </section>
 
-      {/* Sticky save */}
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-ink-200 bg-cream/95 px-4 py-3 backdrop-blur dark:border-ink-700 dark:bg-ink-900/95">
+      {/* Sticky save bar — uses position:sticky inside the form column so the
+          mobile soft keyboard pushes the page (and the bar) up naturally rather
+          than the bar floating over the focused input. The aria-live region
+          announces "Saved" to screen readers without stealing focus. */}
+      <div className="sticky bottom-0 -mx-4 mt-4 border-t border-ink-200 bg-cream/95 px-4 py-3 backdrop-blur sm:-mx-0 sm:rounded-b-2xl dark:border-ink-700 dark:bg-ink-900/95"
+           style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
         <div className="mx-auto flex max-w-3xl items-center justify-between">
-          <div className="text-sm text-ink-500">
+          <div className="text-sm text-ink-500" aria-live="polite">
             {saved ? <span className="inline-flex items-center gap-1 text-accent-600"><Check className="h-4 w-4" />{t('settings.saved')}</span>
               : dirty ? 'Unsaved changes' : 'No changes'}
           </div>

@@ -4,6 +4,421 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] — 2026-05-10
+
+A chess.com Game Review parity pass. Three specialist agents (UI designer,
+chess nerd, AI coach engineer) audited Patzer's review pipeline against
+chess.com Game Review and the gaps got fixed.
+
+### ⚠️ Breaking
+
+- **`SCORING_VERSION` bumped 3 → 4.** All previously-analyzed games re-run
+  silently on first view, picking up MultiPV-aware classification (Great /
+  Forced / refined Brilliant) and the chess.com-style win-percentage ladder.
+
+### Added (chess.com parity)
+
+- **Two new classification labels: `Great` (only-good-move) and `Forced`
+  (only legal move).** Server-side classifier now consumes Stockfish MultiPV
+  to detect when the player's move is the *only* one that holds the position
+  (gap ≥ 150cp to the second-best candidate); chess.com calls these "Great".
+  Forced moves are now distinguished from "Best" because the player had no
+  choice. UI badges + colors added (`!` blue for Great, padlock slate for
+  Forced).
+- **MultiPV (top-3 candidates) per analyzed position.** New
+  `StockfishEngine.evaluateMulti(fen, depth, n)` runs MultiPV search and
+  surfaces every candidate's eval in the player's perspective. Required for
+  Great detection and gap-aware Brilliant gating; will also feed the upcoming
+  game-review prose endpoint.
+- **Tightened win-percentage ladder.** Old bands were too lenient at the
+  bottom (a 15 wp drop only counted as "mistake"). New ladder matches
+  chess.com: < 2 → Good, < 5 → Inaccuracy, < 10 → Mistake, ≥ 10 → Blunder.
+- **Book-move detection by ply count.** First 10 plies are tagged `book`
+  (unless they're an outright blunder/mistake) instead of every opening move
+  being graded against the engine.
+- **Refined Brilliant rules.** Now requires (a) engine's #1 choice, (b)
+  sacrifice ≥ 2 pawns of material, (c) player not already winning by > +5,
+  (d) outside book territory. Old gate fired on routine recaptures.
+- **Coach JSON-mode helper (`chatJson`).** Non-streaming Ollama call with
+  `format: "json"` for structured outputs, ready to power batched per-game
+  review prose without 1-streamed-call-per-move overhead.
+
+### Changed (UI — chess.com Game Review parity)
+
+- **Classification badges are now SVG pictograms** (lightning for Brilliant,
+  double-check for Great, single-check for Best/Excellent, dot for Good, book
+  glyph for Book, X for Miss, padlock for Forced, `?!` `?` `??` for the
+  inaccuracy/mistake/blunder ladder). Replaces the text-symbol set that
+  rendered `★` for Best (read as "favorite", not "best").
+- **Move list is now a 2-column-per-row pair list** with the badge to the
+  right of each SAN, alternating row stripes, current-move auto-scroll, and
+  a left-edge tint per row showing the worst classification of the pair.
+  Skim down the list and you can see where the game tilted.
+- **Eval bar is smoother** — switched from spring to a 280ms ease-out tween,
+  widened to 32px, and now floats the score chip outside the bar on the
+  advantaged side (chess.com convention).
+- **Eval graph: classification-tinted markers** (matching the move-list
+  badges, sourced from a shared `lib/classification.tsx`), Y-axis labels
+  moved to the LEFT, smoother eval-line color (`slate-500`) so it reads
+  against both halves, dark-mode contrast fixed.
+- **Shared classification source of truth.** New `web/src/lib/classification.tsx`
+  exports `CLASS_STYLE` and `GLYPH_SVG` so EvalGraph, MoveList,
+  ClassificationBadge, and ClassificationStats can never drift on color or
+  glyph again.
+
+### Internal
+
+- `refineClassification` signature gains `ply`, `legalMoveCount`,
+  `candidatePlayerCps` (the MultiPV scores). Live-play classification
+  (ws/play.ts) passes ply=99 + empty candidates so Great/Book stay
+  post-game-review-only labels.
+- Ollama streaming defaults: temperature 0.3 (was 0.6), top_p 0.9, num_predict
+  220. Drops rambly outputs on small local models without losing fidelity.
+
+## [3.1.0] — 2026-05-10
+
+A second-pass audit release. Four specialist reviewers (UI designer, strong
+club-player chess nerd, devil's-advocate engineer, GitHub launch operator)
+walked the 3.0 codebase and surfaced a fresh batch of correctness, security,
+and polish issues. The picks below land the high-leverage subset; remaining
+items are tracked in `ROADMAP.md`.
+
+### ⚠️ Breaking
+
+- **`SCORING_VERSION` bumped 2 → 3.** All previously-analyzed games re-run
+  silently on first view, picking up the recalibrated ACPL→Elo curve and the
+  mate-aware cp_loss accounting (see *Fixed* below).
+- **`Skill Level` is no longer used for bot tiers.** The bot now uses
+  `UCI_LimitStrength` + `UCI_Elo` per tier (kid 1320, beginner 1500, easy
+  1700, medium 1900, hard 2200, master 2500, stockfish unlimited). If you
+  scripted against the WebSocket play protocol expecting a `skill` field,
+  `playBotMove` no longer sends one — strength is set at session start.
+
+### Fixed (chess correctness)
+
+- **Mate-vs-mate ACPL pollution.** Plies on a forced mating sequence used to
+  read as 1000-cp losses (the cap clamped a 20000-cp swing): `+M3 → ∓M5`
+  along a forced line counted as a per-ply blunder. Any game ending in a
+  mating attack tanked the loser's Elo for a forced sequence they had no
+  agency over. New `cpLossForPly` treats same-sign mate transitions as
+  cp_loss = 0; sign flips (squandering a mate) still register as maximal loss.
+- **Brilliant false positives on routine recaptures.** The old gate accepted
+  `cpLoss <= 10` and even non-best moves, which mis-fired on `Bxc6 bxc6`
+  trades — the post-move FEN shows the bishop "missing" one ply before the
+  recapture lands, tripping the material-sacrifice heuristic. Tightened to
+  `isBest && cpLoss === 0`, deferring to the engine's PV-aware verdict.
+- **Miss threshold was too narrow.** Required `>= +200cp` AND base in
+  `{mistake, blunder}`, missing the textbook case of squandering a +1.5
+  winning advantage with an inaccuracy. Now triggers on any
+  `inaccuracy / mistake / blunder` that drops from `>= +150cp` into a
+  non-winning eval (`< +50cp`).
+- **ACPL→Elo curve was running ~300 Elo hot in the middle band.** The old
+  piecewise put `ACPL=30 → 1900`, while published Lichess/chess.com
+  rating-vs-ACPL data lands closer to 1500-1650 there. Re-anchored against
+  blitz/rapid distributions: `5→2500, 15→2050, 30→1650, 50→1400, 80→1100,
+  150→750`. Accuracy nudge tightened from ±200 to ±100 so it can't drag a
+  mid-ACPL game into "strong club" territory.
+- **`Easy` and `Beginner` bot tiers played at master strength.** The old
+  `Skill Level` config combined with depth 4-6 actually played around
+  1400-1800 Elo, far above the labels. Tiers are now driven by
+  `UCI_LimitStrength` + `UCI_Elo` so a kid picking "Easy" gets ~1700 Elo,
+  not a near-IM. Stockfish-max tier disables the limiter for full strength.
+
+### Fixed (security / stability)
+
+- **`/api/auth/login` had zero rate limiting.** Bcrypt cost 12 means each
+  attempt is ~250ms of server CPU; without a limiter, parallel POSTs against
+  `admin` could pin the event loop *and* enable cheap credential stuffing.
+  Added a per-IP + per-username sliding window (10 attempts / 5 minutes)
+  with explicit `Retry-After` and a `[auth] rate_limited` log line.
+- **Auth failures are now logged.** `[auth] login_failed` records IP +
+  username + reason; `[auth] login_ok` records role. Hono's request log
+  alone never distinguished a 401 from a 200 to incident response.
+- **Login rotates the cookie.** A pre-login cookie carried into a successful
+  login is now destroyed before the new session is issued, closing the
+  session-fixation window.
+- **Session idle expiry.** Sessions had a 30-day absolute expiry but no idle
+  cap, so a stolen cookie stayed live for the full month. Added
+  `last_active_at` (touched ≤ once/min on `lookupUser`) and a 7-day idle
+  rejection on top of the 30-day absolute cap.
+- **`COOKIE_SECURE` env flag.** Operators terminating TLS at a reverse proxy
+  can now set `COOKIE_SECURE=true` so session cookies aren't shipped in
+  plaintext over the underlying HTTP socket. Default stays `false` to match
+  the documented localhost / LAN deploy.
+- **Defense-in-depth security headers.** Every response now carries a strict
+  `Content-Security-Policy` (`default-src 'self'`, `frame-ancestors 'none'`,
+  `script-src 'self'` — no inline JS), `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, and `Referrer-Policy:
+  no-referrer-when-downgrade`. The 3.0 link-scheme XSS fix is still the
+  primary guard for the coach renderer; CSP is the backstop.
+- **Setup `/test-ollama` was an unauthenticated SSRF probe.** Pre-init only,
+  but an attacker hitting a fresh deploy could POST `{ url:
+  'http://169.254.169.254/' }` and read the response body. URL is now
+  restricted to loopback / RFC1918 / `*.local`, link-local 169.254/16 is
+  explicitly denied, and the response body is never echoed — only `ok` /
+  `unreachable` plus the model list on success.
+- **Stockfish PATH lookup hardened.** Removed the bare `'stockfish'`
+  fallback so the engine driver can't accidentally launch a malicious
+  binary planted earlier in `$PATH`. Discovery now tries the explicit hint,
+  the DB setting, the bundled `bin/`, and a curated set of absolute
+  install paths (`/usr/games`, `/usr/bin`, `/usr/local/bin`,
+  `/opt/homebrew/bin`).
+- **UCI newline injection guard.** Every `evaluate()` and `bestMove()` call
+  now asserts the FEN contains no `\r`/`\n` before forwarding to the engine
+  process. chess.js never emits one today, but the assertion documents the
+  invariant for any future caller.
+- **PvP refresh ate the clock.** Hydrating a PvP session always set
+  `whiteTimeMs/blackTimeMs` to the time control's initial and `lastMoveAt`
+  to `Date.now()` — refreshing the tab during a 5-minute blitz game silently
+  reset both players' clocks back to 5:00. Clocks + last-move timestamp now
+  persist on every move and rehydrate exactly, charging only the wall-clock
+  span elapsed since the last persisted move.
+- **PvP session leak.** Abandoned games (both sockets gone, no save) sat in
+  the `pvpSessions` map forever, holding a `Chess` instance + a Stockfish
+  analysis engine + waiter set per game until process restart. New
+  `setInterval` sweeper drops sessions idle for > 15 minutes when both
+  sides are disconnected, and force-drops any session idle > 6 hours.
+- **Pending challenges never expired.** The `expired` status enum existed
+  but nothing ever wrote it. `/incoming` and `/outgoing` now sweep
+  pending-but-stale (> 15 min) challenges to `expired` on every read; a
+  startup sweep clears the table on boot.
+
+### Added
+
+- **Real `M{n}` mate display in the analyzer eval pill.** The classifier
+  encodes mate as `±10000 - 10·moves`; the eval pill now decodes that back
+  to `M3`, `-M5`, etc. instead of a generic `#`. (The eval bar already did
+  this.)
+- **Home page first-run empty state.** A dashed "Play your first game" card
+  appears when the player has zero saved games, with primary `Play vs Bot`
+  and secondary `Import from Chess.com` (or *Set username* if not yet
+  configured) actions. Replaces the previous near-blank page.
+- **`COOKIE_SECURE` documented in `Configuration`** and the
+  `Troubleshooting` section.
+- **Why Patzer 3-bullet pitch** above the feature list, plus a `docker
+  compose` quickstart inline next to the `docker run` form, plus a
+  `Troubleshooting` section covering the predictable first-run failures
+  (Stockfish path, Ollama unreachability, port collision, cookies behind
+  proxy, password recovery).
+- **Translator's guide.** `CONTRIBUTING.md` now has a step-by-step "Adding
+  a language" section calling out the four files a translator needs to
+  touch (UI locale JSON, coach prompt fragments, i18n register, settings
+  language picker).
+- **`.github/FUNDING.yml`** — surfaces a Sponsor button on the repo page.
+
+### Changed
+
+- **`bcrypt` cost is unchanged at 12 and the password floor stays at 10**;
+  the Setup wizard's helper text now says so. Previously it read "At least
+  6 characters" while the server enforced 10, so first-run users got a
+  server validation error from a form that claimed to accept their input.
+- **Login form a11y.** Inputs now have proper `id` + `htmlFor` pairing and
+  `autoComplete` hints; the error banner is wrapped in `role="alert"
+  aria-live="assertive"` so screen readers announce login failures.
+- **Settings sticky save bar** moved from `position: fixed` to `position:
+  sticky` and respects `env(safe-area-inset-bottom)`. On a phone, the soft
+  keyboard now pushes the page (and the bar) up naturally instead of the
+  bar floating over the focused input.
+- **EvalBar mate colors use design tokens.** Switched from raw
+  `bg-rose-700` / `bg-amber-300` to the `bad` / `warn` semantic tokens so
+  the chrome stays consistent across the three board themes and survives
+  future palette tweaks.
+- **Coach prompt no longer leaks raw centipawn loss.** The FACT block used
+  to embed `(${cp_loss} centipawns lost)` next to the severity phrase, and
+  small models would parrot the number verbatim — anti-pedagogical noise
+  for a kid audience and never useful prose. The severity word already
+  encodes magnitude.
+
+## [3.0.0] — 2026-05-10
+
+The "Patzer" release. The project is renamed and is now ready to be open-sourced.
+Multi-perspective audit pass: a UI designer, a strong-club-player chess nerd,
+a devil's-advocate engineer, and a "GitHub launch" operator each ripped through
+the codebase; their findings drove this changeset. Fixes three real correctness
+bugs (one of them silently undid the 2.2.0 scoring rewrite), closes a stored
+XSS in the coach output, lands a real brand identity, and ships the OSS
+scaffolding (CI, issue templates, security policy).
+
+### ⚠️ Breaking
+
+- **Renamed to Patzer.** `package.json#name` is now `patzer`, server and web
+  workspaces are `@patzer/server` / `@patzer/web`, the docker-compose service
+  is `patzer`, the named volume is `patzer-data`, and the published image is
+  `ghcr.io/SikamikanikoBG/patzer`. Existing deployments need to either rename
+  their `chess-data` volume or copy the SQLite file across — `docker volume
+  create patzer-data && docker run --rm -v chess-data:/from -v
+  patzer-data:/to alpine cp -a /from/. /to/`.
+- **Password minimum is now 10 characters** (was 6) and bcrypt cost is 12 (was
+  10). Existing admin/user accounts keep their hashes; the new floor only
+  applies on create / change.
+- **CSRF guard on all mutating `/api` routes** — every state-changing request
+  must carry `X-Requested-With: patzer`. The bundled fetch helper does this
+  automatically; integrations calling the API by hand need to add the header.
+
+### Fixed
+
+- **Stockfish info parser was overwriting good evals with empty noise.** The
+  `evaluate()` driver accepted every `info` line where `depth >=` and
+  overwrote `lastInfo` — but Stockfish emits `info string …`, `info ...
+  currmove …` (no score), and `info ... lowerbound/upperbound` lines that
+  parsed to `cp:null, pv:[]` and clobbered the real eval. Downstream this
+  silently turned `cp` into `0` for many positions, undoing most of the 2.2.0
+  classifier rewrite. Parser now ignores info lines without a score, drops
+  bound snapshots, and skips `info string` chatter; we also track `seldepth`
+  so deeper lines win ties.
+- **Auto-analysis after a played game was born stale.** The `INSERT INTO
+  analyses` in the bot/PvP completion handlers omitted `scoring_version`, so
+  every freshly-analyzed game was instantly flagged as `analysis_stale=true`
+  by the games list and triggered a free re-analysis on first view. Both
+  inserts now stamp `SCORING_VERSION` and use the same `ON CONFLICT` upsert
+  the explicit analyze route uses.
+- **Stockfish process leak on disconnect.** `quit()` did `setTimeout(kill,
+  200)` then immediately nulled `this.proc` — meanwhile any in-flight
+  `evaluate()` promise was holding a waiter that would never resolve, so
+  callers (including the analysis-engine queue) deadlocked. `quit()` is now
+  async, sends `stop` + `quit`, awaits the OS exit (or SIGKILLs after 250 ms),
+  and rejects every dangling waiter with `engine_terminated`.
+- **Stored XSS via the AI coach.** Markdown links in the coach output were
+  rendered without scheme validation, so a hostile or hallucinating model
+  could emit `[click](javascript:…)` and execute JS in an admin's browser
+  (mitigated by httpOnly cookies, but still attacker-controlled DOM). Link
+  rendering now allow-lists `^https?://` and `mailto:` only; everything else
+  falls back to plain text.
+- **Setup wizard race.** The `userCount() === 0` check happened outside the
+  insert transaction, so two attackers reaching a freshly-deployed instance
+  could both pass the check and both win admin. The check now runs inside the
+  same `db.transaction()` as the insert, with `BEGIN IMMEDIATE` acquired by
+  better-sqlite3 to serialise concurrent calls.
+- **Last-admin guard on PATCH role demotion.** DELETE blocked demoting the
+  only admin; PATCH did not. A single misclick could lock the admin console
+  with no in-app recovery. PATCH now applies the same guard.
+- **chess.com archive URLs are validated.** Defense in depth: the URLs we
+  walk in `fetchRecentGames` must resolve to `api.chess.com/pub/...` over
+  HTTPS. Closes a hypothetical SSRF if the archive list is ever influenced.
+- **chess.com fetches now have a 15 s timeout** (was unbounded). A hung
+  upstream no longer pins request handlers indefinitely.
+- **chess.com username is regex-validated** (`[A-Za-z0-9_-]{2,40}`) at the
+  schema layer in both `/games/import/chesscom` and the profile settings
+  route, instead of a generic `min(1).max(40)`.
+- **Variant games no longer imported.** chess.com `kingofthehill` /
+  `threecheck` etc. games were being slurped in and fed to the
+  standard-chess classifier, which produced nonsense numbers. Importer now
+  filters to `g.rules === 'chess'`.
+- **Per-user single-flight on `/analyze`.** A double-click no longer spawns
+  two concurrent Stockfish processes against the same game.
+- **Layout's "Home" / "Начало" was hardcoded** based on a stringly-typed
+  English-detection check (`t('home.playTitle').split(' ')[0] === 'Play'`).
+  Replaced with a proper `app.home` locale key.
+
+### Added
+
+- **Brand identity.** A real `Logo` component (knight glyph in a rounded
+  container, amber on ink) replaces every `♞` placeholder across boot
+  loader, login, setup, sidebar, and mobile header. Updated `icon.svg`,
+  added `manifest.webmanifest` for PWA-style installs, theme-color meta.
+- **New eval graph.** Hand-rolled SVG, drawn in win-percent space (the
+  Lichess sigmoid) instead of clamped centipawns — mate threats now read
+  intuitively, not as a flat ±1000 line. Mistake / blunder / inaccuracy /
+  miss / brilliant moves get colored markers; current-ply scrubber line +
+  pill; click anywhere to jump. ~80 KB lighter than the Recharts-based
+  version it replaces (Recharts dependency removed).
+- **New eval bar.** Spring-animated height transitions; explicit mate
+  rendering (`M5` instead of just `#`), pulsing accent shadow when mate is
+  on the board.
+- **PGN export + FEN copy** in Game Review. Three small buttons under the
+  eval graph: copy current FEN, copy full PGN, download `.pgn`.
+- **Premoves.** chessground was set up for them visually but the `premovable`
+  config was never wired. It is now — queue your move on the opponent's
+  clock and it fires automatically when their move arrives.
+- **CSRF guard.** See "Breaking" — `X-Requested-With: patzer` is required on
+  every state-changing `/api` request.
+- **Boot loader** is no longer a single pulsing ♞. New: centered logo glyph,
+  short shimmer-bar progress, soft pulse animation.
+- **Analyzer skeleton screen** while the game detail loads (replaces the
+  text "Loading…").
+- **Last-move highlight is softer** — warm amber tint with a 360 ms fade-in,
+  instead of the previous bright orange that fought the board theme.
+- **OSS scaffolding.** `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
+  `THIRD_PARTY_NOTICES.md` (calls out chessground / Stockfish GPL),
+  `ROADMAP.md`, `.github/PULL_REQUEST_TEMPLATE.md`, three issue templates
+  (bug / feature / `coach-hallucination`). Two GitHub Actions workflows:
+  `ci.yml` (typecheck + build on Node 20 and 22 + Docker build) and
+  `release.yml` (multi-arch GHCR push on tag, auto-extracts release notes
+  from this CHANGELOG).
+- **README rewrite.** Hero section with badges, comparison table vs Lichess
+  Studio / Chess.com Review / Aimchess, ASCII architecture diagram, sharper
+  quickstart that defaults to the published GHCR image instead of
+  `git clone && build`.
+
+### Changed
+
+- **bcrypt cost 10 → 12** and password floor 6 → 10. Bcrypt cost roughly 4×
+  the work per hash; combined with a higher minimum length the worst
+  dictionary attacks are no longer trivially feasible against a stolen DB.
+- **Docker build** now uses `npm ci` (was `npm install`) so the lockfile is
+  authoritative — image builds reproducibly across machines and CI.
+- **Docker compose** has `logging.driver: json-file` with `max-size: 10m`
+  / `max-file: 3` so a long-running container doesn't fill the host disk
+  with logs.
+- **chess.com User-Agent** updated from the placeholder
+  `chess-local/0.1 (+https://github.com/local/chess)` to a real
+  `patzer/3.0` UA pointing at the published repo.
+- **Stockfish driver** quit is async, idempotent, and rejects waiters; all
+  callers (`analyze.ts`, `ws/play.ts`, `static test`) updated.
+- **Tailwind config** gained semantic animation tokens (`pulse-soft`,
+  `loader-slide`, `fade-in`, `shimmer`, `last-move-pulse`) plus a `glow`
+  shadow used by the eval bar in mate states.
+
+### Removed
+
+- **Recharts dependency.** The only consumer (the eval graph) was rewritten
+  in plain SVG.
+- **Knight-emoji placeholder logo** — every `♞` brand surface (boot loader,
+  login, setup wizard, sidebar, mobile header, Home page ghost-pawn) is now
+  a real `<LogoMark>`.
+
+## [2.2.0] — 2026-05-10
+
+This release replaces the homemade scoring with a Chess.com/Lichess-style standardized model so move classifications and Elo estimates are believable, and ships a real game-over modal with next-step actions.
+
+### Fixed
+- **Move classification was completely off.** The old `cpLoss` was actually a win-percentage-drop times four, not real centipawns — but the classifier treated it as centipawns, so a typical amateur 1pp drop registered as `cpLoss=4` and got "best". Almost every move (and the small icons during live play) was rated "Best" or "Excellent" regardless of actual quality. Now `cpLoss` is the real centipawn loss derived from the player-perspective engine eval, and classification uses **win-percent drop** (the standard Chess.com/Lichess approach):
+  - Best: <0.5pp drop AND <8cp loss (or engine's #1 move)
+  - Excellent: <2pp / <25cp
+  - Good: <5pp / <60cp
+  - Inaccuracy: <10pp
+  - Mistake: <20pp
+  - Blunder: ≥20pp
+- **Elo estimate was massively inflated.** Old curve gave an amateur ~2100 Elo from accuracy 70%. New `eloFromAcpl` is calibrated against published Lichess/Chess.com rating-vs-ACPL data:
+  - ACPL ~5 → 2700+ (super GM)
+  - ACPL 15 → 2300
+  - ACPL 30 → 1900
+  - ACPL 50 → 1500
+  - ACPL 80 → 1200
+  - ACPL 150 → 800
+  Accuracy% nudges this ±200 Elo at most.
+- **Live-play classification badges** (Best/Excellent/Mistake/etc. shown over the destination square) used the same broken cpLoss math; same fix applies, so badges in Play are now meaningful.
+
+### Added
+- **Game-over modal** — when a game ends, a centered popup appears (backdrop, win/loss/draw header, the result reason) with two big buttons: **Play again** and **Review this game**. Dismiss with the X, click outside, or "Just look at the board" — a small pill in the side panel re-opens it whenever you want.
+- **Auto-reanalyze when scoring changes** — analyses now carry a `scoring_version` stamp. Games analyzed under an older version are silently re-run when you next open them, so all your stats update without any manual action. The games list hides accuracy from stale analyses to avoid mixing old and new numbers.
+
+## [2.1.0] — 2026-05-10
+
+This release sharply reduces coach hallucination, makes moves easier to spot on the board, and lets you rewind through past positions in a live game without losing your place.
+
+### Added
+- **Live-game rewind** — under the board in Play, chevron buttons (or arrow keys) let you step backwards through every position of the current game and jump back to live. While browsing, the board is read-only and a clear "Browsing past position" tag appears. Hit "Back to live" (or press End) to resume play. The actual game state keeps advancing in the background — your opponent's moves are never lost.
+- **Bright orange last-move highlight** — the from/to squares of the most recent move are now tinted in transparent orange so you can immediately see what changed. Replaces chessground's default khaki, applied in both Play and Game Review across all board themes.
+
+### Changed
+- **Coach is no longer asked to reason — only to render.** All chess analysis (piece identification, capture detection, classification, engine recommendation, principal variation) is now pre-computed server-side using chess.js, then handed to the LLM as a structured fact list. The LLM's job is to render those facts as friendly coach prose. The system prompt now explicitly forbids inventing moves, threats, or pieces beyond the facts.
+- **Coach speaks in natural language, not chess notation.** The system prompt and user prompt both forbid SAN like "Nf3" or "Bxe5"; the model is required to say "the knight to f3" or "the bishop takes on e5" instead. Pre-computed facts are themselves natural-language phrases. Pieces use kid-friendly names ("horsey", "castle") for kid audience and standard names otherwise.
+- **Coach temperature lowered to 0.3** so the model sticks to the facts rather than improvising.
+
+### Fixed
+- **Last-move highlight in Play was not displaying** — chessground only shows it when given an explicit `lastMove` prop, which was missing in Play. Now wired from per-ply position tracking.
+
 ## [2.0.0] — 2026-05-10
 
 This is a maturity release: every move on the board is rigorously validated by chess.js (the same library lichess uses), promotion now lets you pick the piece, the coach gets much richer context so it stops inventing pieces, and the UI gets a dashboard, captured-pieces panel, and many smaller polish touches.

@@ -58,6 +58,11 @@ export default function ChessBoard({
             },
           }
         : { free: false },
+      // Premoves: chessground queues a move while it's the opponent's turn and
+      // auto-plays it (firing `movable.events.after`) when the opponent's move
+      // arrives via the next `set()`. Free win for blitz/bullet — the CSS
+      // for premove-dest squares was already in place but the config wasn't.
+      premovable: { enabled: true, showDests: true, castle: true },
       drawable: { enabled: true, defaultSnapToValidMove: true },
     };
     apiRef.current = Chessground(ref.current, config);

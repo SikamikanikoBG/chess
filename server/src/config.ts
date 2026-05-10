@@ -27,6 +27,15 @@ function loadOrCreateSessionSecret(dbPath: string): string {
 
 const dbPath = resolveDbPath();
 
+// Cookie `Secure` flag. The default `false` matches the documented localhost /
+// LAN deploy, where the server speaks plaintext HTTP. Operators terminating TLS
+// (reverse proxy, Cloudflare tunnel, etc.) should set COOKIE_SECURE=true so
+// session cookies aren't shipped in plaintext over the wire.
+function parseBool(v: string | undefined, fallback: boolean): boolean {
+  if (v == null) return fallback;
+  return /^(1|true|yes|on)$/i.test(v);
+}
+
 export const config = {
   port: Number(process.env.PORT ?? 8800),
   host: process.env.HOST ?? '0.0.0.0',
@@ -34,4 +43,5 @@ export const config = {
   sessionSecret: loadOrCreateSessionSecret(dbPath),
   stockfishPathHint: process.env.STOCKFISH_PATH || undefined,
   projectRoot: PROJECT_ROOT,
+  cookieSecure: parseBool(process.env.COOKIE_SECURE, false),
 };

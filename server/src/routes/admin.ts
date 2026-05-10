@@ -24,7 +24,7 @@ router.get('/users', (c) => {
 
 const createUserSchema = z.object({
   username: z.string().trim().min(2).max(40),
-  password: z.string().min(6).max(200),
+  password: z.string().min(10).max(200),
   display_name: z.string().trim().min(1).max(60),
   role: z.enum(['admin', 'user']).default('user'),
   language: z.enum(['en', 'bg']).default('en'),
@@ -55,7 +55,7 @@ router.post('/users', async (c) => {
 
 const updateUserSchema = z.object({
   role: z.enum(['admin', 'user']).optional(),
-  password: z.string().min(6).max(200).optional(),
+  password: z.string().min(10).max(200).optional(),
   display_name: z.string().trim().min(1).max(60).optional(),
   avatar_emoji: z.string().min(1).max(8).optional(),
   language: z.enum(['en', 'bg']).optional(),
@@ -70,14 +70,22 @@ router.patch('/users/:id', async (c) => {
   const parsed = updateUserSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: 'invalid_input' }, 400);
   const d = parsed.data;
-  const exists = db.prepare('SELECT id FROM users WHERE id = ?').get(id);
-  if (!exists) return c.json({ error: 'not_found' }, 404);
+  const target = db.prepare('SELECT id, role FROM users WHERE id = ?').get(id) as { id: number; role: Role } | undefined;
+  if (!target) return c.json({ error: 'not_found' }, 404);
 
   if (d.password) {
     const hash = await hashPassword(d.password);
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, id);
   }
-  if (d.role) db.prepare('UPDATE users SET role = ? WHERE id = ?').run(d.role, id);
+  if (d.role) {
+    // Block demoting the only admin — the same guard DELETE has — otherwise a
+    // single misclick on the last admin permanently locks the console.
+    if (d.role === 'user' && target.role === 'admin') {
+      const adminCount = (db.prepare(`SELECT COUNT(*) c FROM users WHERE role = 'admin'`).get() as { c: number }).c;
+      if (adminCount <= 1) return c.json({ error: 'last_admin' }, 400);
+    }
+    db.prepare('UPDATE users SET role = ? WHERE id = ?').run(d.role, id);
+  }
 
   const profileFields: string[] = [];
   const profileValues: (string | number)[] = [];

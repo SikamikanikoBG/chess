@@ -53,7 +53,7 @@ export default function CoachPanel({ systemConfigured, request, autoPlay, trigge
       const res = await fetch(url, {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'patzer' },
         body: JSON.stringify(body),
         signal: ac.signal,
       });

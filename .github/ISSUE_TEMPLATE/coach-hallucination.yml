@@ -1,0 +1,50 @@
+name: Coach hallucination
+description: The AI coach said something that isn't on the board, or invented moves/pieces/threats.
+labels: ["coach", "hallucination"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Patzer pre-computes chess facts server-side and feeds them to the LLM as
+        plain text — the LLM is supposed to *render* facts, not *reason*. When
+        it slips, we want to see the prompt and the output to harden the
+        anti-hallucination layer.
+
+  - type: input
+    id: model
+    attributes:
+      label: Which Ollama model?
+      placeholder: gemma3:1b / qwen3:8b / llama3.1:70b
+    validations:
+      required: true
+
+  - type: textarea
+    id: position
+    attributes:
+      label: FEN of the position
+      description: Copy from Game Review → Copy FEN.
+      placeholder: r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: What the coach said
+      description: Paste the output verbatim. Include the played move and best move it was asked about.
+    validations:
+      required: true
+
+  - type: textarea
+    id: wrong
+    attributes:
+      label: What's wrong with it?
+      placeholder: Coach said "the bishop on c4 is attacking the queen on d8" — there's no bishop on c4.
+    validations:
+      required: true
+
+  - type: input
+    id: audience
+    attributes:
+      label: Profile audience
+      placeholder: kid / beginner / intermediate / advanced

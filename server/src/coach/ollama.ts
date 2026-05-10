@@ -30,7 +30,7 @@ export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: s
 export async function chatStream(
   messages: ChatMessage[],
   onChunk: (text: string) => void,
-  opts: { model?: string; temperature?: number; signal?: AbortSignal; hardTimeoutMs?: number; idleTimeoutMs?: number } = {},
+  opts: { model?: string; temperature?: number; topP?: number; numPredict?: number; signal?: AbortSignal; hardTimeoutMs?: number; idleTimeoutMs?: number } = {},
 ): Promise<void> {
   const url = ollamaUrl();
   if (!url) throw new Error('ollama_not_configured');
@@ -57,7 +57,14 @@ export async function chatStream(
         model,
         messages,
         stream: true,
-        options: { temperature: opts.temperature ?? 0.6 },
+        // num_predict caps the worst-case token blast — coach sentences rarely
+        // need more than ~220 tokens. top_p keeps the model from venturing into
+        // rare-token rambles when temperature is already low.
+        options: {
+          temperature: opts.temperature ?? 0.3,
+          top_p: opts.topP ?? 0.9,
+          num_predict: opts.numPredict ?? 220,
+        },
       }),
       signal: ac.signal,
     });
@@ -90,6 +97,55 @@ export async function chatStream(
   } finally {
     clearTimeout(hardTimer);
     if (idleTimer) clearTimeout(idleTimer);
+    opts.signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+// Non-streaming JSON-mode call. Used for batched game review where we need
+// structured output (per-move comments + summary) in one response. Ollama's
+// `format: "json"` constrains the model to valid JSON; we still parse defensively.
+export async function chatJson<T = unknown>(
+  messages: ChatMessage[],
+  opts: { model?: string; temperature?: number; numPredict?: number; signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<T> {
+  const url = ollamaUrl();
+  if (!url) throw new Error('ollama_not_configured');
+  const model = opts.model ?? ollamaModel();
+  const timeoutMs = opts.timeoutMs ?? 180_000;
+
+  const ac = new AbortController();
+  const onAbort = () => ac.abort();
+  opts.signal?.addEventListener('abort', onAbort);
+  const timer = setTimeout(() => ac.abort(new Error('ollama_hard_timeout')), timeoutMs);
+  try {
+    const res = await fetch(`${url}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages,
+        stream: false,
+        format: 'json',
+        options: {
+          temperature: opts.temperature ?? 0.2,
+          num_predict: opts.numPredict ?? 1500,
+        },
+      }),
+      signal: ac.signal,
+    });
+    if (!res.ok) throw new Error(`ollama_http_${res.status}`);
+    const data = await res.json() as { message?: { content?: string }; error?: string };
+    if (data.error) throw new Error(`ollama_${data.error}`);
+    const raw = data.message?.content ?? '';
+    // Some models still wrap JSON in fences despite format:"json". Strip them.
+    const cleaned = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+    try {
+      return JSON.parse(cleaned) as T;
+    } catch (err) {
+      throw new Error(`ollama_bad_json: ${(err as Error).message}: ${cleaned.slice(0, 200)}`);
+    }
+  } finally {
+    clearTimeout(timer);
     opts.signal?.removeEventListener('abort', onAbort);
   }
 }

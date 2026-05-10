@@ -22,12 +22,50 @@ import { attachLobbyWebSocket } from './ws/lobby.js';
 const app = new Hono();
 app.use('*', logger());
 
+// Defense-in-depth headers. The 3.0.0 release fixed the link-scheme XSS in the
+// coach renderer; if a future regression brings dangerouslySetInnerHTML back
+// in scope, the CSP is the next line of defense. `'unsafe-inline'` for styles
+// is required because chessground and Tailwind both inject inline style. We
+// keep scripts strict — Vite ships hashed bundles only.
+app.use('*', async (c, next) => {
+  c.header('X-Frame-Options', 'DENY');
+  c.header('X-Content-Type-Options', 'nosniff');
+  c.header('Referrer-Policy', 'no-referrer-when-downgrade');
+  c.header(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "img-src 'self' data:",
+      "font-src 'self' data:",
+      "style-src 'self' 'unsafe-inline'",
+      "script-src 'self'",
+      "connect-src 'self'",
+      "base-uri 'self'",
+      "frame-ancestors 'none'",
+      "form-action 'self'",
+    ].join('; '),
+  );
+  await next();
+});
+
 // In development, the Vite dev server runs on a different port and proxies /api;
 // CORS is allowed for localhost so the browser can hit the server directly too.
 app.use('/api/*', cors({
   origin: (origin) => origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ? origin : undefined,
   credentials: true,
 }));
+
+// CSRF guard: every state-changing /api request must carry `X-Requested-With:
+// patzer`. Browsers will not attach this header on cross-origin form/img/link
+// requests, so simple-request CSRF (which the cookie's SameSite=Lax does not
+// fully block on top-level POSTs) becomes infeasible. The fetch helper in
+// web/src/api.ts adds the header automatically on every mutating call.
+app.use('/api/*', async (c, next) => {
+  const m = c.req.method;
+  if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS') return next();
+  if (c.req.header('X-Requested-With') === 'patzer') return next();
+  return c.json({ error: 'csrf_required' }, 403);
+});
 
 app.get('/api/health', (c) => c.json({ ok: true, time: new Date().toISOString() }));
 

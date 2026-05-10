@@ -1,6 +1,6 @@
 {
-  "name": "@chess/web",
-  "version": "2.0.0",
+  "name": "@patzer/web",
+  "version": "3.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -21,7 +21,6 @@
     "react-dom": "^18.3.1",
     "react-i18next": "^15.1.1",
     "react-router-dom": "^6.28.0",
-    "recharts": "^2.13.3",
     "tailwind-merge": "^2.5.4",
     "zustand": "^5.0.1"
   },

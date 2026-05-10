@@ -28,6 +28,23 @@ cg-board {
   overflow: hidden;
 }
 
+/* Last-move highlight — warm amber tint with a soft 360 ms fade-in. Overrides
+   chessground.brown.css (default khaki). The previous bright orange popped too
+   hard against board themes — amber feels deliberate without being shouty. */
+cg-board square.last-move {
+  background-color: rgba(251, 191, 36, 0.32) !important;
+  animation: last-move-pulse 360ms ease-out;
+}
+cg-board square.last-move.move-dest,
+cg-board square.last-move.premove-dest {
+  background-color: rgba(251, 191, 36, 0.42) !important;
+}
+
+@keyframes last-move-pulse {
+  0%   { background-color: rgba(251, 191, 36, 0.55) !important; }
+  100% { background-color: rgba(251, 191, 36, 0.32) !important; }
+}
+
 /* Board themes — overlay an inline-SVG checkerboard on top of cg-board. The
    SVG describes one 2×2 unit (one light, one dark square in each corner);
    tiled at 25% × 25% it yields a clean 8×8 axis-aligned board. */

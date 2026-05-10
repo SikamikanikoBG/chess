@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Sparkles, Trophy, Settings as SettingsIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Sparkles, Trophy, Settings as SettingsIcon, Copy, Download, Check } from 'lucide-react';
 import { Chess } from 'chess.js';
 import ChessBoard from '../components/ChessBoard';
 import EvalBar from '../components/EvalBar';
@@ -25,6 +25,7 @@ interface GameDetail {
     estimated_elo_white: number | null; estimated_elo_black: number | null;
     moves_json: string;
   } | null;
+  analysis_stale?: boolean;
 }
 
 function fmtCp(cp: number | null | undefined): string {
@@ -68,6 +69,12 @@ export default function GameAnalyzer() {
     } else {
       setAnalysis(null);
     }
+    // Auto-rerun once if the backend says the cached analysis was stale (older
+    // scoring version). Silent — the user just sees the spinner briefly.
+    if (data.analysis_stale && !analyzing) {
+      void analyze(16, true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
   useEffect(() => {
@@ -137,7 +144,7 @@ export default function GameAnalyzer() {
     }
   }
 
-  if (isLoading || !data) return <div className="p-6 text-ink-500">{t('common.loading')}</div>;
+  if (isLoading || !data) return <AnalyzerSkeleton />;
 
   const pos = positions[ply] ?? positions[0];
   const move: AnalyzedMove | undefined = analysis?.moves[ply - 1];
@@ -297,8 +304,17 @@ export default function GameAnalyzer() {
                   evals={analysis.moves.map((m) => ({ ply: m.ply, cp: m.eval_after_cp }))}
                   current={ply}
                   onClick={(p) => setPly(p)}
+                  markers={analysis.moves
+                    .filter((m) => ['blunder','mistake','inaccuracy','miss','brilliant'].includes(m.classification))
+                    .map((m) => ({ ply: m.ply, classification: m.classification }))}
                 />
               </div>
+
+              <ExportRow
+                pgn={data.game.pgn}
+                fen={pos?.fen ?? ''}
+                fileBase={`${(data.game.white || 'white').replace(/[^A-Za-z0-9]+/g, '_')}_vs_${(data.game.black || 'black').replace(/[^A-Za-z0-9]+/g, '_')}`}
+              />
 
               <MoveList
                 moves={analysis.moves.map((m) => ({ ply: m.ply, san: m.san, classification: m.classification }))}
@@ -334,6 +350,65 @@ function SummaryCard({
         <button onClick={onToggleDepth} className="btn-ghost px-2 py-0.5 text-[10px] uppercase tracking-wide">
           <SettingsIcon className="h-3 w-3" /> depth
         </button>
+      </div>
+    </div>
+  );
+}
+
+function ExportRow({ pgn, fen, fileBase }: { pgn: string; fen: string; fileBase: string }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState<'fen' | 'pgn' | null>(null);
+
+  async function copy(kind: 'fen' | 'pgn', text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(kind);
+      setTimeout(() => setCopied(null), 1400);
+    } catch {
+      // Clipboard API may be denied (e.g. insecure origin); silently no-op.
+    }
+  }
+
+  function downloadPgn() {
+    const blob = new Blob([pgn], { type: 'application/x-chess-pgn' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${fileBase}.pgn`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="card flex flex-wrap items-center gap-2 p-2 text-xs">
+      <button onClick={() => copy('fen', fen)} className="btn-ghost px-2 py-1 text-xs" title="Copy FEN of current position">
+        {copied === 'fen' ? <Check className="h-3.5 w-3.5 text-accent-600" /> : <Copy className="h-3.5 w-3.5" />}
+        {copied === 'fen' ? t('common.copied') : `${t('common.copy')} FEN`}
+      </button>
+      <button onClick={() => copy('pgn', pgn)} className="btn-ghost px-2 py-1 text-xs" title="Copy full PGN">
+        {copied === 'pgn' ? <Check className="h-3.5 w-3.5 text-accent-600" /> : <Copy className="h-3.5 w-3.5" />}
+        {copied === 'pgn' ? t('common.copied') : `${t('common.copy')} PGN`}
+      </button>
+      <button onClick={downloadPgn} className="btn-ghost px-2 py-1 text-xs" title="Download .pgn">
+        <Download className="h-3.5 w-3.5" />
+        {t('common.download')}
+      </button>
+    </div>
+  );
+}
+
+function AnalyzerSkeleton() {
+  return (
+    <div className="mx-auto max-w-6xl animate-pulse">
+      <div className="mb-4 h-7 w-40 rounded bg-ink-200/70 dark:bg-ink-700/70" />
+      <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
+        <div className="lg:flex-1 lg:max-w-[760px]">
+          <div className="aspect-square w-full rounded-xl bg-ink-200/70 dark:bg-ink-700/70" />
+          <div className="mt-3 h-12 rounded-xl bg-ink-200/70 dark:bg-ink-700/70" />
+        </div>
+        <div className="space-y-3 lg:w-[360px]">
+          <div className="h-24 rounded-xl bg-ink-200/70 dark:bg-ink-700/70" />
+          <div className="h-32 rounded-xl bg-ink-200/70 dark:bg-ink-700/70" />
+          <div className="h-48 rounded-xl bg-ink-200/70 dark:bg-ink-700/70" />
+        </div>
       </div>
     </div>
   );

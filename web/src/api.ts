@@ -5,6 +5,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
+      // CSRF: the server requires this on every state-changing request. Sending
+      // it on GETs too is harmless and keeps the helper uniform.
+      'X-Requested-With': 'patzer',
       ...(init.headers || {}),
     },
   });

@@ -1,45 +1,146 @@
-# ♞ chess
+<p align="center">
+  <img src="web/public/icon.svg" width="96" alt="Patzer" />
+</p>
 
-Self-hosted, multilingual chess platform for you and your family.
-A "private chess.com" that runs in a single Docker container on your home server.
+<h1 align="center">Patzer</h1>
 
-- **Game Review** — pull your public games from Chess.com, analyze with Stockfish, get Lichess-style classifications (Best / Good / Inaccuracy / Mistake / Blunder), accuracy %, and an evaluation graph.
-- **Play vs Bot** — full games against Stockfish at named difficulty tiers (Kid / Beginner / Easy / Medium / Hard / Master / Stockfish max), with standard time controls.
-- **AI Coach** — local Ollama (your own models, runs offline) explains moves in natural language, gives hints, and adapts the explanation depth to the player (Kid / Beginner / Intermediate / Advanced).
-- **Multilingual** — full English + Bulgarian UI, plus Bulgarian-aware coach. The kid logs in to a profile preconfigured for their language and audience level — no settings to fiddle with.
-- **Browser TTS** — uses your operating system's installed voices (Windows SAPI, macOS, etc). Free, private, offline.
-- **Multi-user with admin console** — first-run wizard creates an admin; the admin creates additional profiles. Per-profile language / coach behavior / TTS / Chess.com username.
+<p align="center">
+  <b>Your private Chess.com.</b> Self-hosted, AI-coached, family-friendly.<br/>
+  Stockfish + your own LLM, in one Docker container.
+</p>
 
-## Quick start (Docker, recommended)
+<p align="center">
+  <a href="https://github.com/SikamikanikoBG/patzer/releases"><img src="https://img.shields.io/github/v/release/SikamikanikoBG/patzer?style=flat-square" alt="release"/></a>
+  <a href="https://github.com/SikamikanikoBG/patzer/pkgs/container/patzer"><img src="https://img.shields.io/badge/ghcr.io-patzer-2496ed?style=flat-square&logo=docker&logoColor=white" alt="GHCR"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/SikamikanikoBG/patzer?style=flat-square" alt="MIT"/></a>
+  <a href="https://github.com/SikamikanikoBG/patzer/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/SikamikanikoBG/patzer/ci.yml?style=flat-square&label=CI" alt="CI"/></a>
+  <a href="https://github.com/SikamikanikoBG/patzer/stargazers"><img src="https://img.shields.io/github/stars/SikamikanikoBG/patzer?style=flat-square" alt="stars"/></a>
+</p>
+
+<p align="center">
+  <em>(hero GIF — see <a href="docs/assets/hero.gif">docs/assets/hero.gif</a> after recording, optional)</em>
+</p>
+
+## Why Patzer
+
+- **Your games stay home.** Single Docker container on a Pi / NAS / old laptop. No cloud, no telemetry, no upsell.
+- **Bring your own LLM.** The AI coach runs against your own [Ollama](https://ollama.com) host. The coach is render-only — chess facts are computed server-side by Stockfish + chess.js, so a small local model can't hallucinate moves or pieces.
+- **Made for a household, not a stadium.** Multi-user with admin console, per-profile language, kid-mode blunder warnings, "horsey" piece names for the youngest profiles.
+
+## What it is
+
+Patzer is a tiny, self-hosted clone of the Chess.com / Lichess workflow you actually use:
+
+- **Game Review** — pull your public Chess.com games, analyze with bundled Stockfish, get Lichess-style classifications (Best / Excellent / Good / Inaccuracy / Mistake / Blunder / Brilliant / Miss), accuracy %, eval graph, mistake markers.
+- **Play vs Bot** — full games against Stockfish at seven named tiers (Kid → Stockfish max), all standard time controls, premoves enabled, kid-mode blunder warnings.
+- **Play vs Friend** — real-time PvP between profiles on the same server over WebSocket.
+- **AI Coach (your LLM)** — point at any [Ollama](https://ollama.com) host. Audience-tuned voices for Kid / Beginner / Intermediate / Advanced. Anti-hallucination by design — chess facts are computed server-side; the LLM only renders them.
+- **Family-ready** — multi-user with admin console, per-profile language, kid-mode blunder warnings, "horsey" piece names for the youngest profiles.
+- **Multilingual** — EN + BG out of the box, UI *and* coach prompts. PRs for more languages welcome.
+- **Self-hosted, single container** — runs on a Pi, a NAS, an old laptop. Your games never leave home.
+
+## First run in five minutes
+
+Pick **one** of these. Either way, open <http://localhost:8800> when it's up; the first visit walks you through a setup wizard.
+
+**`docker run`**
 
 ```bash
-git clone https://github.com/<you>/chess.git
-cd chess
-docker compose up -d --build
+docker run -d \
+  -p 8800:8800 \
+  -v patzer-data:/app/data \
+  --name patzer \
+  ghcr.io/SikamikanikoBG/patzer:latest
 ```
 
-Open `http://<your-server>:8800`. The first visit walks you through the setup wizard.
+**`docker compose`**
 
-You'll need:
-- An [Ollama](https://ollama.com) server reachable from the chess container (for the AI Coach). Any host on your network works — set the URL in the wizard.
+```yaml
+services:
+  patzer:
+    image: ghcr.io/SikamikanikoBG/patzer:latest
+    container_name: patzer
+    restart: unless-stopped
+    ports:
+      - "8800:8800"
+    volumes:
+      - patzer-data:/app/data
+volumes:
+  patzer-data:
+```
+
+You'll want:
+
+- An [Ollama](https://ollama.com) server reachable from the Patzer container (for the AI Coach). The wizard validates the URL and lists available models for you. Patzer accepts loopback / RFC1918 / `*.local` Ollama hosts only — public-Internet model proxies aren't supported here.
 - A Chess.com username (entered later in *Settings*) if you want to import games for review. Optional.
 
-To use a different host port, set `HOST_PORT` in `.env` or pass it inline:
-```bash
-HOST_PORT=9000 docker compose up -d --build
+To use a different host port, run with `-p 9000:8800` (or set `HOST_PORT=9000` if you're using `docker compose`).
+
+If you're terminating TLS at a reverse proxy, set `COOKIE_SECURE=true` in the container's environment so session cookies aren't shipped over plaintext HTTP.
+
+## Compared to alternatives
+
+|                        | Patzer | Lichess Studio | Chess.com Review | Aimchess |
+| ---------------------- | :----: | :------------: | :--------------: | :------: |
+| Self-hosted            |   ✅   |       ❌        |        ❌         |    ❌    |
+| LLM coach (BYO model)  |   ✅   |       ❌        |        ❌         |    ❌    |
+| Imports Chess.com      |   ✅   |       ❌        |        ✅         |    ✅    |
+| Multi-user / family    |   ✅   |       ❌        |        ❌         |    ❌    |
+| Multilingual coach     |   ✅   |  partial UI    |        ❌         |    ❌    |
+| Free                   |   ✅   |       ✅        |        💳         |    💳    |
+
+## How it's built
+
 ```
+┌────────────────────────── one Docker container ───────────────────────────┐
+│                                                                            │
+│  ┌──────────────┐   HTTP / WS   ┌────────────────────────────────────┐    │
+│  │  Browser     │ ◀───────────▶ │ Hono server (Node, TypeScript)     │    │
+│  │  React + Vite│               │  ├─ /api/auth, /games, /analyze… │    │
+│  │  Tailwind    │               │  ├─ /ws/play   (live games)       │    │
+│  │  chessground │               │  └─ /ws/lobby  (challenges)       │    │
+│  └──────────────┘               └────────┬───────────────┬───────────┘    │
+│                                          │               │                │
+│                              UCI         ▼               ▼  HTTP          │
+│                          ┌──────────┐         ┌────────────────┐         │
+│                          │ Stockfish│         │ Ollama (your   │         │
+│                          │ (native) │         │ machine, LAN)  │         │
+│                          └──────────┘         └────────────────┘         │
+│                                          │                                │
+│                                          ▼                                │
+│                                  ┌──────────────┐                         │
+│                                  │   SQLite     │   (volume: /app/data)   │
+│                                  └──────────────┘                         │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+The coach is render-only: every prompt is built from a pre-computed fact list (piece inventory, captured pieces, recent moves in plain English, in-check flag, engine PV) and the LLM is forbidden from inventing moves or pieces. See [server/src/coach/prompts.ts](server/src/coach/prompts.ts) and the [CHANGELOG 2.1.0 entry](CHANGELOG.md) for the why.
 
 ## Local development
 
-Requires Node.js ≥ 20. On Windows, run `setup.ps1` once to download Stockfish into `./bin/`. On Linux/macOS, install Stockfish via your package manager (`apt install stockfish`, `brew install stockfish`, etc.).
+Requirements: Node.js ≥ 20.11.
 
 ```bash
+git clone https://github.com/SikamikanikoBG/patzer.git
+cd patzer
 npm install
+# Windows: download Stockfish into ./bin/
+npm run setup
+# Linux/macOS: install Stockfish via your package manager
+#   apt install stockfish    /    brew install stockfish
+
 npm run dev
 ```
 
-- Server: `http://localhost:8800`
-- Vite dev server (with HMR): `http://localhost:5173` — proxies `/api` and `/ws` to the server.
+- Server: <http://localhost:8800>
+- Vite dev server (HMR): <http://localhost:5173> — proxies `/api` and `/ws` to the server.
+
+Useful scripts:
+
+```bash
+npm run typecheck   # tsc -b across server + web (no emit)
+npm run build       # production build of both workspaces
+```
 
 ## Deploying to a home server
 
@@ -47,7 +148,7 @@ A simple `deploy.ps1` is included. Create `.env.deploy` (gitignored):
 
 ```
 HOST=user@192.168.x.x
-REMOTE_DIR=/home/user/chess
+REMOTE_DIR=/home/user/patzer
 SUDO_PASS=... # only if your user is not in the docker group
 HOST_PORT=8800
 ```
@@ -60,6 +161,8 @@ Then:
 .\deploy.ps1 -Logs      # tail logs after deploy
 ```
 
+A `deploy.sh` for Linux/macOS hosts is on the [roadmap](ROADMAP.md).
+
 ## Configuration
 
 All user-facing configuration is done **through the UI** and persisted in SQLite. The only environment variables are operational:
@@ -71,33 +174,53 @@ All user-facing configuration is done **through the UI** and persisted in SQLite
 | `DB_PATH` | `./data/chess.db` | SQLite database file |
 | `STOCKFISH_PATH` | (auto) | Override Stockfish binary path |
 | `SESSION_SECRET` | (auto-generated) | Cookie signing secret. Persisted on first run. |
+| `COOKIE_SECURE`  | `false` | Set to `true` when terminating TLS at a reverse proxy so session cookies are flagged `Secure`. |
 
 System settings (Ollama URL, default coach model, Stockfish path override) live in *Admin → System*.
 Per-profile settings (language, audience, coach behavior, TTS voice, Chess.com username) live in *Settings*.
 
 ## How move classification works
 
-Each played move is compared against the engine's best move at the same position. The "win percentage" is computed from the centipawn evaluation (Lichess formula), and the difference between the win % before and after the move determines the classification:
+Each played move is compared against the engine's best move at the same position. We compute the **win-percentage drop** using the Lichess sigmoid (`100 / (1 + exp(-0.00368208 · cp))`) and combine it with real centipawn loss to classify:
 
-| Classification | Centipawn loss |
-|---|---|
-| Best ★ | ≤10, or exactly the engine's top choice |
-| Excellent ✓ | ≤25 |
-| Good · | ≤50 |
-| Inaccuracy ?! | ≤100 |
-| Mistake ? | ≤250 |
-| Blunder ?? | >250 |
+| Classification | Win-% drop | Centipawn loss |
+| --- | --- | --- |
+| Best ★ | < 0.5 | < 8 (or engine's #1) |
+| Excellent ✓ | < 2 | < 25 |
+| Good · | < 5 | < 60 |
+| Inaccuracy ?! | < 10 | — |
+| Mistake ? | < 20 | — |
+| Blunder ?? | ≥ 20 | — |
 
-Per-game accuracy % is the average of per-move accuracies (Lichess formula: `103.1668 · exp(-0.04354 · Δwin%) - 3.1669`, clamped to [0, 100]).
+`Brilliant` (`!!`) fires on calculated sacrifices that keep a winning eval; `Miss` flags blunders that gave away a winning advantage. Per-game accuracy is the harmonic-friendly Lichess formula `103.1668 · exp(-0.04354 · Δwin%) - 3.1669`, clamped to `[0, 100]`.
+
+Estimated Elo is calibrated against published Lichess/Chess.com ACPL-vs-rating data — ACPL ~5 → 2700+, ACPL 30 → ~1900, ACPL 80 → ~1200. Accuracy nudges this ±200 Elo at most.
 
 ## Tech
 
 - **Server:** Node 20 · TypeScript · [Hono](https://hono.dev) · [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) · [chess.js](https://github.com/jhlywa/chess.js) · `ws` · native [Stockfish](https://stockfishchess.org/)
-- **Web:** React 18 · Vite · Tailwind CSS · [chessground](https://github.com/lichess-org/chessground) · Recharts · framer-motion · react-i18next · TanStack Query
-- **Coach:** [Ollama](https://ollama.com) (default model: `gemma3:1b`, recommend `gemma4:26b` for quality)
+- **Web:** React 18 · Vite · Tailwind CSS · [chessground](https://github.com/lichess-org/chessground) · framer-motion · react-i18next · TanStack Query
+- **Coach:** [Ollama](https://ollama.com) (default model: `gemma3:1b`; recommend something larger like `qwen2.5:7b` for nicer voice)
 - **TTS:** browser Web Speech API (uses installed OS voices)
 - **Persistence:** single SQLite file in `./data/`
 
+## Troubleshooting
+
+- **"Stockfish binary not found"** — Patzer no longer falls back to a bare `stockfish` PATH lookup (defense-in-depth: a malicious binary earlier in `$PATH` would otherwise run as the server user). Either install Stockfish into `/usr/games/stockfish`, `/usr/local/bin/stockfish`, `/opt/homebrew/bin/stockfish`, or `bin/stockfish` in the project, or set `STOCKFISH_PATH` (env) / *Admin → System → Stockfish path*.
+- **"Ollama unreachable" during setup** — Patzer's setup-time test endpoint only allows loopback / RFC1918 / `*.local` URLs. Use `http://host.docker.internal:11434` from inside Docker on Mac/Windows, or your LAN IP on Linux. After setup, change it any time in *Admin → System*.
+- **Port 8800 already in use** — `-p 9000:8800` (docker run) or `HOST_PORT=9000 docker compose up -d`.
+- **Lost your admin password** — there is no in-app reset yet. Until one ships, edit `chess.db` directly: open `data/chess.db` with `sqlite3` and replace the row's `password_hash` with a `bcryptjs` hash (cost ≥ 12).
+- **Cookies dropped behind a reverse proxy** — see `COOKIE_SECURE=true` above. The cookie also requires the same hostname for both the page and the API.
+- **PvP refresh ate my clock** — fixed in 3.1.0 (clocks + last-move timestamp now persist on every move). Earlier versions reset the time control on rehydration.
+
+## Contributing
+
+PRs welcome — please read [CONTRIBUTING.md](CONTRIBUTING.md) first. Translations especially encouraged.
+
+## Security
+
+See [SECURITY.md](SECURITY.md). For vulnerabilities, **don't** open a public issue — email the address listed there.
+
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT — see [LICENSE](./LICENSE). Note the GPL-3.0 components (chessground, Stockfish) — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -12,7 +12,7 @@ const profileSchema = z.object({
   avatar_emoji: z.string().min(1).max(8).optional(),
   language: z.enum(['en', 'bg']).optional(),
   audience: z.enum(['kid', 'beginner', 'intermediate', 'advanced']).optional(),
-  chesscom_username: z.string().trim().max(40).nullable().optional(),
+  chesscom_username: z.string().trim().regex(/^[A-Za-z0-9_-]{2,40}$/).nullable().or(z.literal('')).optional(),
   coach_behavior: z.enum(['silent', 'on_demand', 'always_on_pedagogical']).optional(),
   tts_enabled: z.boolean().optional(),
   tts_voice: z.string().nullable().optional(),

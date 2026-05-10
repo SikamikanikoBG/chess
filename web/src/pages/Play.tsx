@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Flag, Lightbulb, Swords, Bot, Users as UsersIcon, Check, X, Loader2 } from 'lucide-react';
+import { Flag, Lightbulb, Swords, Bot, Users as UsersIcon, Check, X, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Radio, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Chess } from 'chess.js';
 import ChessBoard from '../components/ChessBoard';
 import ClassificationBadge from '../components/ClassificationBadge';
 import CoachPanel from '../components/CoachPanel';
@@ -19,6 +20,9 @@ const DIFFICULTIES: Difficulty[] = ['kid','beginner','easy','medium','hard','mas
 const TIME_CONTROLS = ['untimed','bullet','blitz','rapid','classical'] as const;
 
 interface Move { ply: number; san: string; uci: string; classification?: Classification }
+interface Position { fen: string; lastFrom?: string; lastTo?: string }
+
+const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
 interface ServerMsg {
   type: string;
@@ -68,8 +72,12 @@ export default function Play() {
   const [color, setColor] = useState<'white' | 'black' | 'random'>('white');
   const [tc, setTc] = useState<typeof TIME_CONTROLS[number]>('untimed');
 
-  const [fen, setFen] = useState('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+  const [fen, setFen] = useState(START_FEN);
   const [moves, setMoves] = useState<Move[]>([]);
+  // Per-ply positions, used both for the last-move highlight and the rewind UI.
+  const [positions, setPositions] = useState<Position[]>([{ fen: START_FEN }]);
+  // null = at the live position; otherwise an index into `positions` (read-only browse mode).
+  const [browseIndex, setBrowseIndex] = useState<number | null>(null);
   const [userColor, setUserColor] = useState<'white' | 'black'>('white');
   const [whiteMs, setWhiteMs] = useState(0);
   const [blackMs, setBlackMs] = useState(0);
@@ -80,6 +88,7 @@ export default function Play() {
   const [opponent, setOpponent] = useState<{ display_name: string; online: boolean } | null>(null);
   const [blunder, setBlunder] = useState<BlunderPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [gameOverDismissed, setGameOverDismissed] = useState(false);
   const [lastClassifiedMove, setLastClassifiedMove] = useState<{ ply: number; san: string; uci: string; classification: Classification; cp_loss: number; best_san: string | null; fen_before: string } | null>(null);
   const [boardArrows, setBoardArrows] = useState<{ orig: string; dest: string; brush: string }[]>([]);
   const [boardKey, setBoardKey] = useState(0);
@@ -151,9 +160,12 @@ export default function Play() {
   }
 
   function resetGameState() {
-    setFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+    setFen(START_FEN);
     setMoves([]); setResult(null); setHint(null); setLastClassifiedMove(null);
     setOpponent(null); setBoardArrows([]);
+    setPositions([{ fen: START_FEN }]);
+    setBrowseIndex(null);
+    setGameOverDismissed(false);
   }
 
   function handleMessage(ev: MessageEvent) {
@@ -162,12 +174,32 @@ export default function Play() {
       case 'game_started':
       case 'pvp_hello': {
         setPhase('playing');
+        const startFen = msg.fen ?? START_FEN;
         if (msg.fen) setFen(msg.fen);
         if (msg.your_color) setUserColor(msg.your_color);
         if (msg.opponent) setOpponent({ display_name: msg.opponent.display_name, online: msg.opponent.online });
         if (msg.whiteTimeMs !== undefined) setWhiteMs(msg.whiteTimeMs);
         if (msg.blackTimeMs !== undefined) setBlackMs(msg.blackTimeMs);
         if (msg.time_control) setTc(msg.time_control as typeof TIME_CONTROLS[number]);
+        // Rebuild the position list from the SAN history (PvP reconnect can land mid-game).
+        if (msg.history && msg.history.length > 0) {
+          const replay = new Chess();
+          const positionsFromHistory: Position[] = [{ fen: replay.fen() }];
+          const movesFromHistory: Move[] = [];
+          for (let i = 0; i < msg.history.length; i++) {
+            const san = msg.history[i]!;
+            const m = replay.move(san, { strict: false });
+            if (!m) break;
+            positionsFromHistory.push({ fen: replay.fen(), lastFrom: m.from, lastTo: m.to });
+            movesFromHistory.push({ ply: i + 1, san: m.san, uci: m.from + m.to + (m.promotion ?? '') });
+          }
+          setPositions(positionsFromHistory);
+          setMoves(movesFromHistory);
+        } else {
+          setPositions([{ fen: startFen }]);
+          setMoves([]);
+        }
+        setBrowseIndex(null);
         playSound('game_start');
         break;
       }
@@ -180,6 +212,11 @@ export default function Play() {
           const flags = inferMoveFlagsFromSan(msg.san);
           soundForMove(flags);
           setMoves((m) => [...m, { ply: m.length + 1, san: msg.san!, uci: msg.uci! }]);
+        }
+        if (msg.fen && msg.uci) {
+          const from = msg.uci.slice(0, 2);
+          const to = msg.uci.slice(2, 4);
+          setPositions((p) => [...p, { fen: msg.fen!, lastFrom: from, lastTo: to }]);
         }
         if (msg.whiteTimeMs !== undefined) setWhiteMs(msg.whiteTimeMs);
         if (msg.blackTimeMs !== undefined) setBlackMs(msg.blackTimeMs);
@@ -282,7 +319,38 @@ export default function Play() {
   }
 
   const turn = fen.split(' ')[1] === 'w' ? 'white' : 'black';
-  const movable = phase === 'playing' && turn === userColor && !blunder && !previewing;
+  // Browse / live state
+  const liveIndex = positions.length - 1;
+  const isBrowsing = browseIndex !== null && browseIndex !== liveIndex;
+  const displayedPos = positions[browseIndex ?? liveIndex] ?? positions[0]!;
+  const displayedFen = isBrowsing ? displayedPos.fen : fen;
+  const displayedLastMove: [string, string] | undefined = displayedPos.lastFrom && displayedPos.lastTo
+    ? [displayedPos.lastFrom, displayedPos.lastTo]
+    : undefined;
+  const movable = phase === 'playing' && turn === userColor && !blunder && !previewing && !isBrowsing;
+  const goToLive = () => setBrowseIndex(null);
+  const stepBack = () => setBrowseIndex((b) => Math.max(0, (b ?? liveIndex) - 1));
+  const stepForward = () => setBrowseIndex((b) => {
+    const next = (b ?? liveIndex) + 1;
+    if (next >= liveIndex) return null;
+    return next;
+  });
+
+  // Keyboard nav for the browse rewind (skip when typing in inputs)
+  useEffect(() => {
+    if (phase !== 'playing') return;
+    function onKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'ArrowLeft') { e.preventDefault(); stepBack(); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); stepForward(); }
+      else if (e.key === 'Home') { e.preventDefault(); setBrowseIndex(0); }
+      else if (e.key === 'End') { e.preventDefault(); goToLive(); }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, liveIndex]);
 
   // ---- SETUP screen ----
   if (phase === 'setup' && !pvpGameId) {
@@ -394,18 +462,26 @@ export default function Play() {
           <div className="relative my-2">
             <div className={`board-theme-${user?.profile.board_theme ?? 'wood'}`}>
               <ChessBoard
-                fen={fen}
+                fen={displayedFen}
                 orientation={userColor}
                 movable={movable}
                 turnColor={turn}
                 onMove={attemptMove}
-                arrows={boardArrows as never[]}
+                lastMove={displayedLastMove as never}
+                arrows={isBrowsing ? [] : (boardArrows as never[])}
                 resetKey={boardKey}
               />
             </div>
-            {/* Classification badge for the last classified user move (bot mode only) */}
-            {lastClassifiedMove && lastMoveDestSquare === lastClassifiedMove.uci.slice(2, 4) && (
+            {/* Classification badge for the last classified user move (bot mode only).
+                Hidden while browsing past positions. */}
+            {!isBrowsing && lastClassifiedMove && lastMoveDestSquare === lastClassifiedMove.uci.slice(2, 4) && (
               <ClassificationBadge classification={lastClassifiedMove.classification} square={lastClassifiedMove.uci.slice(2, 4)} orientation={userColor} />
+            )}
+            {/* Subtle "browsing past position" overlay tag */}
+            {isBrowsing && (
+              <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full bg-amber-500/90 px-3 py-1 text-xs font-semibold text-white shadow-lift">
+                {t('play.browsingPast')}
+              </div>
             )}
           </div>
           <div className="my-1 flex items-center justify-between gap-2">
@@ -413,15 +489,31 @@ export default function Play() {
           </div>
           <ClockBar timeMs={userColor === 'white' ? whiteMs : blackMs} active={turn === userColor} label={user?.profile.display_name ?? (userColor === 'white' ? t('play.white') : t('play.black'))} />
 
+          {/* Rewind nav — visible once at least one move has been played */}
+          {phase !== 'setup' && positions.length > 1 && (
+            <div className="mt-3 flex items-center justify-center gap-2">
+              <button onClick={() => setBrowseIndex(0)} disabled={(browseIndex ?? liveIndex) === 0} className="btn-secondary h-11 w-11 p-0" title={t('play.rewindFirst')}><ChevronsLeft className="h-5 w-5" /></button>
+              <button onClick={stepBack} disabled={(browseIndex ?? liveIndex) === 0} className="btn-secondary h-11 w-11 p-0" title={t('play.rewindPrev')}><ChevronLeft className="h-5 w-5" /></button>
+              <div className="flex h-11 min-w-[5.5rem] items-center justify-center rounded-xl bg-ink-100 px-3 font-mono text-sm tabular-nums dark:bg-ink-800">
+                {(browseIndex ?? liveIndex)} / {liveIndex}
+              </div>
+              <button onClick={stepForward} disabled={!isBrowsing} className="btn-secondary h-11 w-11 p-0" title={t('play.rewindNext')}><ChevronRight className="h-5 w-5" /></button>
+              <button onClick={goToLive} disabled={!isBrowsing} className={`h-11 px-4 text-sm ${isBrowsing ? 'btn-primary' : 'btn-secondary'}`} title={t('play.rewindLive')}>
+                {isBrowsing ? <><Radio className="h-4 w-4" />{t('play.rewindLive')}</> : <ChevronsRight className="h-5 w-5" />}
+              </button>
+            </div>
+          )}
+
           {phase === 'playing' && (
             <div className="mt-3 flex items-center justify-between gap-2">
               <div className="text-sm">
-                {previewing ? <Spinner inline label={t('play.checking')} />
+                {isBrowsing ? <span className="font-medium text-amber-600">{t('play.browsingPast')}</span>
+                  : previewing ? <Spinner inline label={t('play.checking')} />
                   : turn === userColor ? <span className="font-medium text-accent-600">{t('play.yourTurn')}</span>
                   : <span className="text-ink-500">{t('play.thinking')}</span>}
               </div>
               <div className="flex gap-2">
-                <button onClick={requestHint} disabled={hintLoading} className="btn-secondary h-11 px-4 text-sm">
+                <button onClick={requestHint} disabled={hintLoading || isBrowsing} className="btn-secondary h-11 px-4 text-sm">
                   {hintLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lightbulb className="h-4 w-4" />}
                   {t('play.hint')}
                 </button>
@@ -448,30 +540,24 @@ export default function Play() {
             <MovesList moves={moves} />
           </div>
 
+          {/* Compact pill in side panel after the user dismisses the modal — lets
+              them re-open it later without having to leave the page. */}
           <AnimatePresence>
-            {phase === 'over' && result && (
-              <motion.div
-                initial={{ opacity: 0, y: 10, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }}
-                className="card p-6 text-center"
+            {phase === 'over' && result && gameOverDismissed && (
+              <motion.button
+                initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                onClick={() => setGameOverDismissed(false)}
+                className="card-hover w-full p-3 text-left"
               >
-                <div className="mb-2 text-3xl">
-                  {result.result === '1/2-1/2' ? '½ ½'
-                    : (result.result === '1-0' && userColor === 'white') || (result.result === '0-1' && userColor === 'black') ? '🏆'
-                    : '🤝'}
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="font-semibold">
+                    {result.result === '1/2-1/2' ? `½ ½ ${t('play.result.draw')}`
+                      : (result.result === '1-0' && userColor === 'white') || (result.result === '0-1' && userColor === 'black') ? `🏆 ${t('play.result.win')}`
+                      : `🤝 ${t('play.result.loss')}`}
+                  </span>
+                  <span className="text-xs text-ink-500">{t('play.showResult')}</span>
                 </div>
-                <div className="text-xl font-bold">
-                  {result.result === '1/2-1/2' ? t('play.result.draw')
-                    : (result.result === '1-0' && userColor === 'white') || (result.result === '0-1' && userColor === 'black') ? t('play.result.win')
-                    : t('play.result.loss')}
-                </div>
-                <div className="mt-1 text-sm text-ink-500">{t(`play.reason.${result.reason}`, { defaultValue: result.reason })}</div>
-                <div className="mt-4 flex justify-center gap-2">
-                  <button onClick={() => { setPhase('setup'); resetGameState(); }} className="btn-secondary">{t('play.playAgain')}</button>
-                  {result.gameId && (
-                    <button onClick={() => nav(`/review/${result.gameId}`)} className="btn-primary">{t('play.review')}</button>
-                  )}
-                </div>
-              </motion.div>
+              </motion.button>
             )}
           </AnimatePresence>
         </div>
@@ -501,6 +587,75 @@ export default function Play() {
             </motion.div>
           </motion.div>
         )}
+      </AnimatePresence>
+
+      {/* GAME OVER MODAL */}
+      <AnimatePresence>
+        {phase === 'over' && result && !gameOverDismissed && (() => {
+          const isDraw = result.result === '1/2-1/2';
+          const isWin = (result.result === '1-0' && userColor === 'white') || (result.result === '0-1' && userColor === 'black');
+          const headerClass = isWin
+            ? 'border-accent-500/30 bg-accent-500/10 text-accent-700 dark:text-accent-300'
+            : isDraw
+              ? 'border-ink-300 bg-ink-100 text-ink-700 dark:border-ink-600 dark:bg-ink-800 dark:text-ink-200'
+              : 'border-bad/30 bg-bad/10 text-bad';
+          const headline = isDraw ? t('play.result.draw') : isWin ? t('play.result.win') : t('play.result.loss');
+          const emoji = isDraw ? '½ ½' : isWin ? '🏆' : '🤝';
+          return (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setGameOverDismissed(true)}
+              className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-4 sm:items-center"
+            >
+              <motion.div
+                initial={{ y: 24, scale: 0.92, opacity: 0 }}
+                animate={{ y: 0, scale: 1, opacity: 1, transition: { type: 'spring', stiffness: 280, damping: 26 } }}
+                exit={{ y: 24, scale: 0.92, opacity: 0 }}
+                onClick={(e) => e.stopPropagation()}
+                className="card w-full max-w-md overflow-hidden shadow-lift"
+              >
+                <div className={`relative flex items-center gap-3 border-b px-5 py-4 ${headerClass}`}>
+                  <div className="text-3xl leading-none">{emoji}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xl font-bold leading-tight">{headline}</div>
+                    <div className="mt-0.5 text-xs opacity-80">{t(`play.reason.${result.reason}`, { defaultValue: result.reason })}</div>
+                  </div>
+                  <button
+                    onClick={() => setGameOverDismissed(true)}
+                    className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-lg text-ink-500 hover:bg-black/5 dark:hover:bg-white/10"
+                    title={t('common.cancel')}
+                  ><X className="h-4 w-4" /></button>
+                </div>
+                <div className="space-y-3 p-5">
+                  <p className="text-sm text-ink-600 dark:text-ink-300">{t('play.overPrompt')}</p>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <button
+                      onClick={() => { setPhase('setup'); resetGameState(); }}
+                      className="btn-primary flex-1"
+                    >
+                      <Swords className="h-4 w-4" />{t('play.playAgain')}
+                    </button>
+                    {result.gameId ? (
+                      <button onClick={() => nav(`/review/${result.gameId}`)} className="btn-secondary flex-1">
+                        <Sparkles className="h-4 w-4" />{t('play.review')}
+                      </button>
+                    ) : (
+                      <button disabled className="btn-secondary flex-1" title={t('play.saving')}>
+                        <Loader2 className="h-4 w-4 animate-spin" />{t('play.saving')}
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setGameOverDismissed(true)}
+                    className="btn-ghost w-full text-xs text-ink-500"
+                  >
+                    {t('play.keepLooking')}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
     </div>
   );
@@ -685,12 +840,13 @@ function MovesList({ moves }: { moves: Move[] }) {
 
 function ClsGlyph({ c }: { c: Classification }) {
   const map: Record<Classification, string> = {
-    brilliant: '!!', best: '★', excellent: '✓', good: '·', book: '📖',
-    inaccuracy: '?!', mistake: '?', blunder: '??', miss: '✗',
+    brilliant: '!!', great: '!', best: '★', excellent: '✓', good: '·', book: '📖',
+    forced: '🔒', inaccuracy: '?!', mistake: '?', blunder: '??', miss: '✗',
   };
   const color: Record<Classification, string> = {
-    brilliant: 'text-move-brilliant', best: 'text-move-best', excellent: 'text-move-excellent',
-    good: 'text-move-good', book: 'text-move-book', inaccuracy: 'text-move-inaccuracy',
+    brilliant: 'text-move-brilliant', great: 'text-move-great', best: 'text-move-best',
+    excellent: 'text-move-excellent', good: 'text-move-good', book: 'text-move-book',
+    forced: 'text-move-forced', inaccuracy: 'text-move-inaccuracy',
     mistake: 'text-move-mistake', blunder: 'text-move-blunder', miss: 'text-move-miss',
   };
   return <span className={`ml-1 text-[10px] font-bold ${color[c]}`}>{map[c]}</span>;

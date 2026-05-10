@@ -6,6 +6,7 @@ import { api } from '../api';
 import { useAuth } from '../state/auth';
 import { cn } from '../lib/utils';
 import ChangelogModal from './ChangelogModal';
+import { LogoMark, LogoLockup } from './Logo';
 
 export default function Layout() {
   const { t, i18n } = useTranslation();
@@ -54,15 +55,15 @@ export default function Layout() {
   function NavContent() {
     return (
       <>
-        <NavLink to="/" className="mb-6 flex items-center gap-2 px-2">
-          <span className="text-2xl">♞</span>
+        <NavLink to="/" className="mb-6 flex items-center gap-3 px-2">
+          <LogoMark size={32} />
           <div>
             <div className="font-semibold text-ink-900 dark:text-cream">{t('app.name')}</div>
             <div className="text-xs text-ink-500">{t('app.tagline')}</div>
           </div>
         </NavLink>
         <nav className="space-y-1">
-          <NavItem to="/" icon={Home} label={t('home.playTitle').split(' ')[0] === 'Play' ? 'Home' : 'Начало'} />
+          <NavItem to="/" icon={Home} label={t('app.home')} />
           <NavItem to="/play" icon={Swords} label={t('home.playTitle')} />
           <NavItem to="/review" icon={BookOpen} label={t('home.reviewTitle')} />
           <NavItem to="/settings" icon={SettingsIcon} label={t('common.settings')} />
@@ -137,8 +138,7 @@ export default function Layout() {
             <Menu className="h-5 w-5" />
           </button>
           <NavLink to="/" className="flex items-center gap-2">
-            <span className="text-xl">♞</span>
-            <span className="font-semibold">{t('app.name')}</span>
+            <LogoLockup size={24} />
           </NavLink>
           <button onClick={logout} className="btn-ghost p-2"><LogOut className="h-4 w-4" /></button>
         </header>

@@ -1,7 +1,8 @@
 {
   "app": {
-    "name": "Chess",
-    "tagline": "Play. Review. Learn."
+    "name": "Patzer",
+    "tagline": "Your private Chess.com.",
+    "home": "Home"
   },
   "common": {
     "save": "Save",
@@ -27,10 +28,13 @@
     "connected": "Connected",
     "disconnected": "Disconnected",
     "optional": "(optional)",
-    "required": "Required"
+    "required": "Required",
+    "copy": "Copy",
+    "copied": "Copied",
+    "download": "Download"
   },
   "setup": {
-    "title": "Welcome",
+    "title": "Welcome to Patzer",
     "subtitle": "Let's set up your chess server. This is a one-time wizard.",
     "step1": "Create your admin account",
     "step2": "Connect Ollama (for the AI Coach)",
@@ -42,7 +46,8 @@
     "ollamaConnected": "Connected — found {{count}} models",
     "ollamaFailed": "Could not connect: {{error}}",
     "finish": "Finish setup",
-    "creating": "Creating…"
+    "creating": "Creating…",
+    "passwordHint": "At least 10 characters."
   },
   "login": {
     "title": "Welcome back",
@@ -128,7 +133,15 @@
     "playAgain": "Play again",
     "review": "Review this game",
     "saving": "Saving game…",
-    "savedAndAnalyzing": "Game saved — analyzing in background"
+    "savedAndAnalyzing": "Game saved — analyzing in background",
+    "rewindFirst": "Jump to start",
+    "rewindPrev": "Previous move",
+    "rewindNext": "Next move",
+    "rewindLive": "Back to live",
+    "browsingPast": "Browsing past position",
+    "overPrompt": "What's next?",
+    "keepLooking": "Just look at the board",
+    "showResult": "Tap to view"
   },
   "review": {
     "title": "Game Review",
@@ -152,10 +165,12 @@
   },
   "classification": {
     "brilliant": "Brilliant",
+    "great": "Great",
     "best": "Best",
     "excellent": "Excellent",
     "good": "Good",
     "book": "Book",
+    "forced": "Forced",
     "inaccuracy": "Inaccuracy",
     "mistake": "Mistake",
     "blunder": "Blunder",

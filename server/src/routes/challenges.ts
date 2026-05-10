@@ -7,6 +7,17 @@ import { notifyUser } from '../ws/lobby.js';
 const router = new Hono();
 router.use('*', requireAuth);
 
+// Auto-expire pending challenges older than this. Without it, a user's
+// `incoming` list could keep returning a months-old "join my game" from a
+// peer who has long since closed the tab.
+const CHALLENGE_TTL_MIN = 15;
+function expireStaleChallenges(): void {
+  db.prepare(`UPDATE challenges SET status = 'expired'
+              WHERE status = 'pending'
+                AND created_at < datetime('now', ?)`)
+    .run(`-${CHALLENGE_TTL_MIN} minutes`);
+}
+
 interface ChallengeRow {
   id: number;
   from_user_id: number; to_user_id: number;
@@ -80,6 +91,7 @@ router.post('/', async (c) => {
 
 router.get('/incoming', (c) => {
   const me = c.get('user');
+  expireStaleChallenges();
   const rows = db.prepare(`
     SELECT c.*,
       uf.username AS from_username, pf.display_name AS from_display_name, pf.avatar_emoji AS from_avatar,
@@ -95,6 +107,7 @@ router.get('/incoming', (c) => {
 
 router.get('/outgoing', (c) => {
   const me = c.get('user');
+  expireStaleChallenges();
   const rows = db.prepare(`
     SELECT c.*,
       uf.username AS from_username, pf.display_name AS from_display_name, pf.avatar_emoji AS from_avatar,

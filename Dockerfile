@@ -9,11 +9,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ \
  && rm -rf /var/lib/apt/lists/*
 
-# Workspace install
-COPY package.json package-lock.json* tsconfig.base.json ./
+# Workspace install — `npm ci` enforces the lockfile so the image is
+# reproducible across machines and CI.
+COPY package.json package-lock.json tsconfig.base.json ./
 COPY server/package.json ./server/
 COPY web/package.json ./web/
-RUN npm install --include=dev
+RUN npm ci --include=dev
 
 # Sources
 COPY server ./server
@@ -32,9 +33,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # Install only production deps for the server workspace
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json ./
 COPY server/package.json ./server/
-RUN npm install --omit=dev --workspace=server
+RUN npm ci --omit=dev --workspace=server
 
 # Copy built artifacts from builder
 COPY --from=builder /app/server/dist ./server/dist

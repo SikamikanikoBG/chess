@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Swords, BookOpen, Settings as SettingsIcon, ChevronRight, Trophy, Frown, Equal, Zap, Flame, Target, Activity } from 'lucide-react';
+import { Swords, BookOpen, Settings as SettingsIcon, ChevronRight, Trophy, Frown, Equal, Zap, Flame, Target, Activity, Download, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../state/auth';
 import { api } from '../api';
@@ -43,8 +43,7 @@ export default function Home() {
         initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
         className="card-hover relative overflow-hidden"
       >
-        <div className="absolute inset-0 bg-gradient-to-br from-ink-900 to-ink-800 dark:from-cream dark:to-amber-50" />
-        <div className="absolute -right-8 -top-8 text-[200px] leading-none opacity-[0.06] dark:opacity-[0.08]">♞</div>
+        <div className="absolute inset-0 bg-gradient-to-br from-ink-900 via-ink-900 to-amber-900/20 dark:from-cream dark:via-cream dark:to-amber-100" />
         <div className="relative flex flex-col gap-3 p-6 sm:p-8">
           <div className="flex items-center gap-4">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-cream/15 text-3xl text-cream backdrop-blur dark:bg-ink-900/15 dark:text-ink-900">
@@ -62,6 +61,43 @@ export default function Home() {
           </p>
         </div>
       </motion.section>
+
+      {/* First-run empty state — fires when the user has zero saved games.
+          Without this the page collapses to greeting + 3 cards on a fresh
+          install, leaving 70% of the viewport blank with no next step. */}
+      {stats && stats.total === 0 && (
+        <section className="card-hover relative overflow-hidden border-dashed">
+          <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-accent-500/15 text-accent-600">
+                <Sparkles className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold">Play your first game</h3>
+                <p className="mt-1 text-sm text-ink-500 dark:text-ink-300">
+                  {user?.profile.chesscom_username
+                    ? "Ready to go. Hop into Play vs Bot — or import your Chess.com games to review."
+                    : "Pick an opponent and a time control, or set your Chess.com username in Settings to import existing games."}
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <Link to="/play" className="btn-primary text-sm">
+                <Swords className="h-4 w-4" /> Play vs Bot
+              </Link>
+              {user?.profile.chesscom_username ? (
+                <Link to="/review" className="btn-secondary text-sm">
+                  <Download className="h-4 w-4" /> Import games
+                </Link>
+              ) : (
+                <Link to="/settings" className="btn-secondary text-sm">
+                  <SettingsIcon className="h-4 w-4" /> Set username
+                </Link>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Stats strip */}
       {stats && stats.total > 0 && (

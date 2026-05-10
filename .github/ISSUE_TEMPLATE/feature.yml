@@ -1,0 +1,32 @@
+name: Feature request
+description: An idea for how Patzer could be better.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the use case, not the implementation.
+      placeholder: I want to practice the King's Gambit by starting bot games from a fixed opening…
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: How might Patzer help?
+      description: Sketch the feature you imagine. Screenshots / Figma welcome.
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which part of the app?
+      options:
+        - Game Review
+        - Play vs Bot
+        - Play vs Friend (PvP)
+        - AI Coach
+        - Admin / Settings
+        - Setup wizard
+        - Docs / website
+        - Other

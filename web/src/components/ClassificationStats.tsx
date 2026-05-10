@@ -1,22 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { CLASSIFICATIONS, type Classification, type AnalyzedMove } from '../types';
-
-const GLYPH: Record<Classification, string> = {
-  brilliant: '!!', best: '★', excellent: '✓', good: '·', book: '📖',
-  inaccuracy: '?!', mistake: '?', blunder: '??', miss: '✗',
-};
-
-const TEXT_COLOR: Record<Classification, string> = {
-  brilliant: 'text-move-brilliant',
-  best: 'text-move-best',
-  excellent: 'text-move-excellent',
-  good: 'text-move-good',
-  book: 'text-move-book',
-  inaccuracy: 'text-move-inaccuracy',
-  mistake: 'text-move-mistake',
-  blunder: 'text-move-blunder',
-  miss: 'text-move-miss',
-};
+import { CLASS_STYLE, GLYPH_SVG } from '../lib/classification';
 
 interface Props {
   moves: AnalyzedMove[];
@@ -25,57 +9,56 @@ interface Props {
   onClickClassification?: (cls: Classification, side: 'white' | 'black') => void;
 }
 
+// Per-classification counts, two columns (W / B). Hides rows that are 0/0 by
+// default so the panel stays compact for clean games (chess.com convention).
 export default function ClassificationStats({ moves, whiteName, blackName, onClickClassification }: Props) {
   const { t } = useTranslation();
 
-  const counts = (() => {
-    const w = Object.fromEntries(CLASSIFICATIONS.map((c) => [c, 0])) as Record<Classification, number>;
-    const b = Object.fromEntries(CLASSIFICATIONS.map((c) => [c, 0])) as Record<Classification, number>;
-    for (const m of moves) {
-      const tgt = m.ply % 2 === 1 ? w : b;
-      tgt[m.classification] += 1;
-    }
-    return { white: w, black: b };
-  })();
+  const w = Object.fromEntries(CLASSIFICATIONS.map((c) => [c, 0])) as Record<Classification, number>;
+  const b = Object.fromEntries(CLASSIFICATIONS.map((c) => [c, 0])) as Record<Classification, number>;
+  for (const m of moves) {
+    const tgt = m.ply % 2 === 1 ? w : b;
+    tgt[m.classification] += 1;
+  }
+
+  const ordered = [...CLASSIFICATIONS].sort((a, c) => CLASS_STYLE[a].order - CLASS_STYLE[c].order);
 
   return (
     <div className="card overflow-hidden">
-      <h3 className="border-b border-ink-100 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-ink-500 dark:border-ink-700">
-        {t('review.moves')}
-      </h3>
-      <div className="grid grid-cols-[1fr_auto_auto] items-center text-sm">
-        <div className="bg-ink-50 px-4 py-1 text-[10px] uppercase tracking-wide text-ink-400 dark:bg-ink-900" />
-        <div className="bg-ink-50 px-3 py-1 text-center text-[10px] uppercase tracking-wide text-ink-400 dark:bg-ink-900" title={whiteName}>
-          ◯ {t('review.white')}
-        </div>
-        <div className="bg-ink-50 px-3 py-1 text-center text-[10px] uppercase tracking-wide text-ink-400 dark:bg-ink-900" title={blackName}>
-          ● {t('review.black')}
-        </div>
-        {CLASSIFICATIONS.map((c) => (
-          <Row key={c} cls={c} wCount={counts.white[c]} bCount={counts.black[c]}
-               label={t(`classification.${c}`)} onSel={onClickClassification} />
-        ))}
+      <div className="grid grid-cols-[1fr_3rem_3rem] items-center border-b border-ink-100 bg-ink-50/60 px-3 py-1.5 text-[10px] uppercase tracking-wide text-ink-500 dark:border-ink-700 dark:bg-ink-900/40">
+        <span>{t('review.moves')}</span>
+        <span className="text-center" title={whiteName}>W</span>
+        <span className="text-center" title={blackName}>B</span>
       </div>
+      {ordered.map((c) => {
+        const wc = w[c], bc = b[c];
+        if (wc === 0 && bc === 0) return null;
+        const s = CLASS_STYLE[c];
+        return (
+          <div key={c} className="grid grid-cols-[1fr_3rem_3rem] items-center border-b border-ink-100 last:border-0 dark:border-ink-800">
+            <div className="flex items-center gap-2 px-3 py-1.5">
+              <span className={`flex h-5 w-5 items-center justify-center rounded-full text-white ${s.bgClass}`}>
+                <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">{GLYPH_SVG[s.glyph]}</svg>
+              </span>
+              <span className="text-sm">{t(`classification.${s.labelKey}`)}</span>
+            </div>
+            <button
+              disabled={wc === 0}
+              onClick={() => onClickClassification?.(c, 'white')}
+              className={`px-2 py-1.5 text-center font-mono tabular-nums ${wc > 0 ? 'cursor-pointer hover:bg-ink-50 dark:hover:bg-ink-800' : 'opacity-30'}`}
+            >
+              {wc}
+            </button>
+            <button
+              disabled={bc === 0}
+              onClick={() => onClickClassification?.(c, 'black')}
+              className={`px-2 py-1.5 text-center font-mono tabular-nums ${bc > 0 ? 'cursor-pointer hover:bg-ink-50 dark:hover:bg-ink-800' : 'opacity-30'}`}
+            >
+              {bc}
+            </button>
+          </div>
+        );
+      })}
     </div>
-  );
-}
-
-function Row({ cls, label, wCount, bCount, onSel }:
-  { cls: Classification; label: string; wCount: number; bCount: number;
-    onSel?: (cls: Classification, side: 'white' | 'black') => void }) {
-  const dim = wCount === 0 && bCount === 0;
-  return (
-    <>
-      <div className={`flex items-center gap-2 border-t border-ink-100 px-4 py-1.5 dark:border-ink-800 ${dim ? 'opacity-40' : ''}`}>
-        <span className={`inline-flex h-5 w-5 items-center justify-center rounded text-[11px] font-bold ${TEXT_COLOR[cls]} bg-current/15`}>
-          <span className={TEXT_COLOR[cls]}>{GLYPH[cls]}</span>
-        </span>
-        <span>{label}</span>
-      </div>
-      <div className={`border-t border-ink-100 px-3 py-1.5 text-center font-mono tabular-nums dark:border-ink-800 ${wCount > 0 ? 'cursor-pointer hover:bg-ink-50 dark:hover:bg-ink-800' : ''}`}
-           onClick={() => wCount > 0 && onSel?.(cls, 'white')}>{wCount}</div>
-      <div className={`border-t border-ink-100 px-3 py-1.5 text-center font-mono tabular-nums dark:border-ink-800 ${bCount > 0 ? 'cursor-pointer hover:bg-ink-50 dark:hover:bg-ink-800' : ''}`}
-           onClick={() => bCount > 0 && onSel?.(cls, 'black')}>{bCount}</div>
-    </>
   );
 }

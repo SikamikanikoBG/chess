@@ -7,12 +7,25 @@
 const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(s: string): string { return s.replace(/[&<>"']/g, (ch) => ESC[ch]!); }
 
+// The coach's output is untrusted (the LLM may hallucinate, be poisoned, or be
+// hostile). Only http(s) and mailto links survive — anything else (most
+// importantly `javascript:` and `data:`) is rendered as plain text.
+const SAFE_URL = /^(?:https?:\/\/|mailto:)/i;
+function safeUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  return SAFE_URL.test(trimmed) ? trimmed : null;
+}
+
 function inline(s: string): string {
   return s
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/(?<!\*)\*(?!\*)(.+?)\*(?!\*)/g, '<em>$1</em>')
     .replace(/`([^`]+)`/g, '<code class="rounded bg-ink-100 px-1 py-0.5 text-[12px] dark:bg-ink-700">$1</code>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a class="text-accent-600 underline" href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label: string, url: string) => {
+      const safe = safeUrl(url);
+      if (!safe) return label;
+      return `<a class="text-accent-600 underline" href="${safe}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    });
 }
 
 export function renderMarkdown(md: string): string {

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '../db.js';
 import { requireAuth } from '../auth/middleware.js';
 import { fetchRecentGames, getPlayer, type ChessComGame } from '../chess/chesscom.js';
+import { SCORING_VERSION } from '../chess/classifier.js';
 
 const router = new Hono();
 router.use('*', requireAuth);
@@ -10,15 +11,18 @@ router.use('*', requireAuth);
 router.get('/', (c) => {
   const user = c.get('user');
   const limit = Math.min(Number(c.req.query('limit') ?? 50), 200);
+  // An analysis cached at an older scoring_version reads as "not analyzed" in
+  // the list — accuracy values from the old scoring would mislead the user.
   const rows = db.prepare(`
     SELECT g.id, g.source, g.external_id, g.white, g.black, g.result, g.time_control, g.end_time, g.user_color,
-           CASE WHEN a.game_id IS NOT NULL THEN 1 ELSE 0 END as analyzed,
-           a.accuracy_white, a.accuracy_black
+           CASE WHEN a.game_id IS NOT NULL AND a.scoring_version >= ? THEN 1 ELSE 0 END as analyzed,
+           CASE WHEN a.scoring_version >= ? THEN a.accuracy_white ELSE NULL END as accuracy_white,
+           CASE WHEN a.scoring_version >= ? THEN a.accuracy_black ELSE NULL END as accuracy_black
     FROM games g LEFT JOIN analyses a ON a.game_id = g.id
     WHERE g.user_id = ?
     ORDER BY g.end_time DESC NULLS LAST, g.id DESC
     LIMIT ?
-  `).all(user.id, limit);
+  `).all(SCORING_VERSION, SCORING_VERSION, SCORING_VERSION, user.id, limit);
   return c.json({ games: rows });
 });
 
@@ -27,8 +31,17 @@ router.get('/:id', (c) => {
   const id = Number(c.req.param('id'));
   const game = db.prepare('SELECT * FROM games WHERE id = ? AND user_id = ?').get(id, user.id);
   if (!game) return c.json({ error: 'not_found' }, 404);
-  const analysis = db.prepare('SELECT * FROM analyses WHERE game_id = ?').get(id);
-  return c.json({ game, analysis });
+  const analysis = db.prepare('SELECT * FROM analyses WHERE game_id = ?').get(id) as
+    | { scoring_version: number }
+    | undefined;
+  // If the analysis was made at an older scoring_version, hide it — UI will
+  // show the Analyze CTA (and we set a flag so the frontend can auto-fire it).
+  const stale = !!(analysis && analysis.scoring_version < SCORING_VERSION);
+  return c.json({
+    game,
+    analysis: stale ? null : analysis,
+    analysis_stale: stale,
+  });
 });
 
 router.delete('/:id', (c) => {
@@ -40,7 +53,7 @@ router.delete('/:id', (c) => {
 });
 
 const importSchema = z.object({
-  username: z.string().trim().min(1).max(40).optional(),
+  username: z.string().trim().regex(/^[A-Za-z0-9_-]{2,40}$/).optional(),
   limit: z.number().int().min(1).max(200).default(20),
 });
 

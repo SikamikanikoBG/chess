@@ -5,6 +5,7 @@ import { LogIn } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../api';
 import { useAuth } from '../state/auth';
+import { LogoMark } from '../components/Logo';
 
 export default function Login() {
   const { t, i18n } = useTranslation();
@@ -39,8 +40,8 @@ export default function Login() {
         initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
         className="relative w-full max-w-sm"
       >
-        <div className="mb-8 text-center">
-          <div className="mb-3 text-6xl">♞</div>
+        <div className="mb-8 flex flex-col items-center text-center">
+          <LogoMark size={64} className="mb-3" />
           <h1 className="text-3xl font-bold tracking-tight">{t('app.name')}</h1>
           <p className="mt-1 text-sm text-ink-500">{t('app.tagline')}</p>
         </div>
@@ -48,14 +49,18 @@ export default function Login() {
         <form onSubmit={submit} className="card space-y-4 p-6 shadow-lift">
           <h2 className="text-lg font-semibold">{t('login.title')}</h2>
           <div>
-            <label className="label mb-1 block">{t('common.username')}</label>
-            <input className="input" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} />
+            <label className="label mb-1 block" htmlFor="login-username">{t('common.username')}</label>
+            <input id="login-username" className="input" autoComplete="username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} />
           </div>
           <div>
-            <label className="label mb-1 block">{t('common.password')}</label>
-            <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <label className="label mb-1 block" htmlFor="login-password">{t('common.password')}</label>
+            <input id="login-password" className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
-          {error && <div className="rounded-lg border border-bad/30 bg-bad/10 px-3 py-2 text-sm text-bad">{error}</div>}
+          {error && (
+            <div role="alert" aria-live="assertive" className="rounded-lg border border-bad/30 bg-bad/10 px-3 py-2 text-sm text-bad">
+              {error}
+            </div>
+          )}
           <button type="submit" disabled={busy || !username || !password} className="btn-primary w-full">
             <LogIn className="h-4 w-4" />
             {busy ? t('login.submitting') : t('login.submit')}

@@ -5,6 +5,7 @@ import { CheckCircle2, AlertCircle, ChevronRight, ChevronLeft, Sparkles, Loader2
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../api';
 import { useAuth } from '../state/auth';
+import { LogoMark } from '../components/Logo';
 
 export default function Setup() {
   const { t, i18n } = useTranslation();
@@ -28,7 +29,7 @@ export default function Setup() {
     setTestStatus('testing'); setTestError(''); setModels([]);
     try {
       const res = await fetch('/api/setup/test-ollama', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'patzer' },
         body: JSON.stringify({ url: ollamaUrl }),
       });
       const data = await res.json();
@@ -71,8 +72,8 @@ export default function Setup() {
         initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
         className="relative w-full max-w-xl"
       >
-        <div className="mb-6 text-center">
-          <div className="mb-3 text-6xl">♞</div>
+        <div className="mb-6 flex flex-col items-center text-center">
+          <LogoMark size={64} className="mb-3" />
           <h1 className="text-3xl font-bold tracking-tight">{t('setup.title')}</h1>
           <p className="page-sub">{t('setup.subtitle')}</p>
         </div>
@@ -108,10 +109,10 @@ export default function Setup() {
                 </div>
                 <div>
                   <label className="label mb-1 block">{t('common.password')}</label>
-                  <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-                  <p className="mt-1 text-xs text-ink-400">At least 6 characters.</p>
+                  <input className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+                  <p className="mt-1 text-xs text-ink-400">{t('setup.passwordHint')}</p>
                 </div>
-                <button onClick={() => setStep(2)} disabled={!username || password.length < 6} className="btn-primary w-full">
+                <button onClick={() => setStep(2)} disabled={!username || password.length < 10} className="btn-primary w-full">
                   Next <ChevronRight className="h-4 w-4" />
                 </button>
               </motion.div>

@@ -15,6 +15,7 @@ import GameAnalyzer from './pages/GameAnalyzer';
 import AdminUsers from './pages/admin/Users';
 import AdminSystem from './pages/admin/System';
 import IncomingChallengeModal from './components/IncomingChallengeModal';
+import { LogoMark } from './components/Logo';
 
 export default function App() {
   const { loading, setupRequired, user, refresh } = useAuth();
@@ -80,8 +81,13 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center text-ink-500">
-        <div className="animate-pulse">♞</div>
+      <div className="flex h-screen flex-col items-center justify-center gap-4 text-ink-500">
+        <div className="animate-pulse-soft">
+          <LogoMark size={56} />
+        </div>
+        <div className="h-1 w-32 overflow-hidden rounded-full bg-ink-200 dark:bg-ink-800">
+          <div className="h-full w-1/3 animate-loader-slide bg-amber-500" />
+        </div>
       </div>
     );
   }
