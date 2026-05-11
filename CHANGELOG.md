@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.4.1] — 2026-05-11
+
+### Changed — accuracy calibration
+
+Re-ran the Hikaru April 2026 benchmark across three volatility-weight cap
+values to find the sweet spot:
+
+| cap | MAE vs chess.com | bias | max Δ | ±3 hit |
+|-----|------------------|------|-------|--------|
+| ∞ (v7) | 5.32 | −0.29 | 21.47 | 45% |
+| 2.0 | 5.60 | +4.80 | 19.27 | 45% |
+| 3.0 (7.4.0 shipped) | 4.90 | +3.52 | 17.27 | 50% |
+| **4.0 (7.4.1)** | **4.97** | **+2.58** | 17.57 | **55%** |
+
+4.0 picked over 3.0: nearly identical MAE, lower systematic bias (+2.58 vs
++3.52 = users see numbers closer to chess.com), and the better ±3-pt
+hit-rate is what most users will actually feel ("am I within 3 points of
+what chess.com told me"). The 7.4.0 CHANGELOG incorrectly described the
+clamp as reverted — it actually shipped at 3.0; this corrects the record.
+
 ## [7.4.0] — 2026-05-11
 
 This is the code drop matching the 7.1.x / 7.2.0 entries above (board sizing

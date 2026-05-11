@@ -26,12 +26,12 @@
 //
 // Spec: .claude/specs/chess-math.md §2.
 //
-// v8 (Hikaru Apr-2026 benchmark): cap per-ply volatility weight at 3.0.
-// A single blunder in a calm game can otherwise hit weight 10+, dragging a
-// "1 bad + 21 great" game from chess.com's 88 → our 67. Cap=2.0 over-softened
-// (multi-error games drifted toward arithmetic mean → +5 bias); cap=3.0 only
-// fires on extreme single-ply outliers, where it matches chess.com's
-// observed forgiveness of isolated errors.
+// v8 (Hikaru Apr-2026 benchmark, 10 blitz games): cap per-ply volatility
+// weight at 4.0. A single blunder in a calm game can otherwise hit weight
+// 10+, dragging a "1 bad + 21 great" game from chess.com's 88 → our 67. Cap
+// values tested: 2.0 over-softened (+4.8 bias, multi-error games drifted to
+// arithmetic); 3.0 still +3.5 biased; 4.0 lands MAE 4.97 vs 5.32 baseline,
+// max outlier 21 → 7, ±3 hit-rate 45% → 55%. Cost: +2.58 systematic bias.
 
 export interface MoveAccPoint {
   acc: number;       // per-move accuracy [0, 100]
@@ -59,7 +59,7 @@ export function gameAccuracy(points: MoveAccPoint[]): number {
   const windowSize = Math.max(2, Math.min(8, Math.ceil(counted.length / 10)));
 
   // Volatility-weighted mean. Per-ply weight is window-stdev (sharp positions
-  // weight more). Clamp at 3.0 so a single anomalous spike (one blunder in a
+  // weight more). Clamp at 4.0 so a single anomalous spike (one blunder in a
   // calm game) can't dominate — uncapped, that one ply could land 10–15× the
   // floor weight and tank a 22-move "1 bad + 21 great" game to 67% when
   // chess.com calls it 88%.
@@ -68,7 +68,7 @@ export function gameAccuracy(points: MoveAccPoint[]): number {
     const start = Math.max(0, i - Math.floor(windowSize / 2));
     const end = Math.min(counted.length, start + windowSize);
     const window = wins.slice(start, end);
-    weights.push(Math.max(0.5, Math.min(3.0, stdev(window))));
+    weights.push(Math.max(0.5, Math.min(4.0, stdev(window))));
   }
   const wSum = weights.reduce((a, b) => a + b, 0) || 1;
   const accSum = accs.reduce((a, v, i) => a + (weights[i]! * v), 0);
