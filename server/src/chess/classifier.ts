@@ -1,3 +1,4 @@
+import { Chess } from 'chess.js';
 import type { Classification } from '../types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5,14 +6,22 @@ import type { Classification } from '../types.js';
 // or estimateElo curve changes — analyses cached at an older version will be
 // silently re-run on next view.
 //
-// v6 (this revision) — chess.com Game Review parity pass. See
-// `.claude/specs/chess-math.md`. Re-anchored ACPL→Elo curve, ECO-based book
-// detection, mate-line Miss, eval-flip Great, trivial-recapture filter on
-// Brilliant, accuracy nudge weight 0.4 → 0.2, perf rating 600-gap clamp, and
-// looser cp-loss tiebreakers on Excellent/Good (chess.com's reported
-// distribution puts more moves in those buckets than our v5 thresholds).
+// v8 (this revision) — calibrated against Hikaru April 2026 archive:
+//   - Great tightened: gap threshold 150 → 200 cp, and the "near-best
+//     (cpLoss ≤ 30) + only-good-move" pattern from v7 is removed entirely.
+//     chess.com never tags Great unless the player picked engine #1, and we
+//     were over-firing it (5 Greats per blitz game in benchmark game 2). Pure
+//     #1-or-eval-flip now.
+//   - Note: a parallel accuracy.ts softening was prototyped (volatility-weight
+//     clamp) to fix single-blunder under-reading but introduced a +5 systemic
+//     bias on multi-error games. Reverted — current MAE vs chess.com 5.32 on
+//     the 10-game Hikaru benchmark, bias ~0.
+//
+// v7 — Brilliant replays engine PV 4 plies through chess.js (sacrifice must
+//   survive recapture); cpLossForAcpl caps ACPL at 300.
+// v6 — chess.com Game Review parity pass. See `.claude/specs/chess-math.md`.
 // ─────────────────────────────────────────────────────────────────────────────
-export const SCORING_VERSION = 6;
+export const SCORING_VERSION = 8;
 
 // Soft ceiling for ply-based book fallback when no ECO lookup is provided.
 // With ECO-based detection (the analyzer passes `inBook` per ply), this is
@@ -81,10 +90,11 @@ export function materialFromFen(fen: string): { white: number; black: number } {
   return { white, black };
 }
 
-// Quick test: does the engine's PV begin with an equalising recapture sequence?
-// Brilliant requires a *real* sacrifice — if the opponent's reply trades back
-// and our next move recaptures cleanly, the material loss was illusory and
-// the played move should be Best, not Brilliant.
+// Does the engine's PV resolve into an equalising recapture sequence?
+// Brilliant requires a *real* sacrifice — if the opponent's PV reply trades
+// back, we replay 4 plies through chess.js and compare end-material to
+// pre-move material. If we've recovered to within 1 pawn, the sacrifice was
+// illusory and the move should classify as Best, not Brilliant.
 function isTrivialRecapture(args: {
   sideToMove: 'white' | 'black';
   matBefore: { white: number; black: number };
@@ -92,16 +102,31 @@ function isTrivialRecapture(args: {
   pv: string[];                 // engine PV from the position AFTER the played move, in UCI
   fenAfterPlayed: string;       // FEN after the played move (chess.js wants this)
 }): boolean {
-  if (args.pv.length < 1) return false;
-  // Cheap rule: if material recovers to within 1 pawn of the pre-move state
-  // after at most 2 plies of PV, treat as trivial. We avoid replaying the PV
-  // through chess.js here for speed — the cp_loss guard (< 20) already filters
-  // genuine sacs out of the trivial bucket, so this is conservative.
   const playerMatBefore = args.sideToMove === 'white' ? args.matBefore.white : args.matBefore.black;
   const playerMatAfter = args.sideToMove === 'white' ? args.matAfterPlayed.white : args.matAfterPlayed.black;
   const lossNow = playerMatBefore - playerMatAfter;
-  if (lossNow <= 0) return true;  // didn't actually lose anything ⇒ not a sac at all
-  return false;
+  if (lossNow <= 0) return true; // didn't actually lose anything ⇒ not a sac at all
+
+  // Replay up to 4 plies of the engine PV (opponent reply + our recapture +
+  // opponent's follow-up + our second tempo) and re-check material.
+  if (args.pv.length < 1) return false;
+  try {
+    const replay = new Chess(args.fenAfterPlayed);
+    for (const uci of args.pv.slice(0, 4)) {
+      const m = replay.move({
+        from: uci.slice(0, 2),
+        to: uci.slice(2, 4),
+        promotion: uci.slice(4) || undefined,
+      });
+      if (!m) break;
+    }
+    const matEnd = materialFromFen(replay.fen());
+    const playerMatAtEnd = args.sideToMove === 'white' ? matEnd.white : matEnd.black;
+    // Recovered to within 1 pawn of starting material ⇒ trivial trade, not a sac.
+    return (playerMatBefore - playerMatAtEnd) <= 1;
+  } catch {
+    return false;
+  }
 }
 
 // After the basic classification, upgrade to Brilliant/Great or downgrade to
@@ -175,19 +200,19 @@ export function refineClassification(args: {
     }
   }
 
-  // GREAT — two patterns satisfy chess.com's "critical only-good move":
-  //   1. ONLY-GOOD-MOVE — multipv #1 is much better than #2 (≥ 150cp gap)
-  //      and the played move is #1. Needs MultiPV; degrades gracefully.
-  //   2. EVAL-FLIP — the played move lifts a losing position into equality
-  //      or better (before ≤ -150cp, after ≥ -50cp) and is engine's #1.
-  //      This catches resourceful-defence moves the MultiPV rule misses.
-  if (isBest && ply > BOOK_PLIES) {
-    if (candidatePlayerCps.length >= 2) {
+  // GREAT — chess.com's "critical only-good move". Two patterns (v8):
+  //   1. ONLY-GOOD-MOVE (engine #1) — multipv #1 dominates #2 by ≥200cp.
+  //   2. EVAL-FLIP — engine #1 move that lifts a losing position to equality
+  //      (before ≤ -150cp, after ≥ -50cp). Resourceful-defence moves.
+  // The v7 "near-best alt within 30cp" pattern is dropped — chess.com Great
+  // requires the engine's literal #1, and that rule was firing too eagerly.
+  if (ply > BOOK_PLIES) {
+    if (isBest && candidatePlayerCps.length >= 2) {
       const top = candidatePlayerCps[0]!;
       const second = candidatePlayerCps[1]!;
-      if (top - second >= 150) return 'great';
+      if (top - second >= 200) return 'great';
     }
-    if (playerEvalBeforeCp <= -150 && playerEvalAfterCp >= -50) return 'great';
+    if (isBest && playerEvalBeforeCp <= -150 && playerEvalAfterCp >= -50) return 'great';
   }
 
   // MISS — two patterns:
@@ -330,6 +355,14 @@ export function cpLossForPly(playerEvalBeforeCp: number, playerEvalAfterCp: numb
     return 1000;
   }
   return Math.min(1000, Math.max(0, playerEvalBeforeCp - playerEvalAfterCp));
+}
+
+// Centipawn-loss for ACPL aggregation. Same as `cpLossForPly` but capped at
+// 300 instead of 1000 so a single mate-flip ply doesn't drag the player's
+// average down by ~25 ACPL points (≈ 300-400 Elo) on an otherwise-clean game.
+// chess.com applies a similar cap when aggregating ACPL.
+export function cpLossForAcpl(playerEvalBeforeCp: number, playerEvalAfterCp: number): number {
+  return Math.min(300, cpLossForPly(playerEvalBeforeCp, playerEvalAfterCp));
 }
 
 // Win-% drop for a single ply with the same mate-aware smoothing as

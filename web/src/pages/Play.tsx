@@ -447,7 +447,10 @@ export default function Play() {
   return (
     <div className="mx-auto max-w-7xl">
       <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
-        {/* BOARD COLUMN */}
+        {/* BOARD COLUMN — full width on lg+ (max 760px). The BOARD ELEMENT
+            below uses aspect-square + a viewport-height-aware max-width so the
+            board shrinks vertically on short screens without making the
+            column itself narrow. */}
         <div className="mx-auto w-full lg:mx-0 lg:flex-1 lg:max-w-[760px]">
           <ClockBar timeMs={userColor === 'white' ? blackMs : whiteMs} active={turn !== userColor} label={oppLabel} flip />
           {oppDisconnected && (
@@ -459,8 +462,15 @@ export default function Play() {
           <div className="my-1 flex items-center justify-between gap-2">
             <CapturedPieces fen={fen} side={userColor === 'white' ? 'black' : 'white'} />
           </div>
-          <div className="relative my-2">
-            <div className={`board-theme-${user?.profile.board_theme ?? 'wood'}`}>
+          <div className="my-2 flex justify-center">
+            {/* `aspect-square` + `lg:max-w-[calc(100vh-26rem)]` shrinks the
+                board to fit the viewport height (chrome ≈ 17rem inside column
+                + ≈ 9rem outside) without narrowing the surrounding column.
+                Position:relative here so the badge children are anchored to
+                the board, not the outer flex container. */}
+            <div
+              className={`relative aspect-square w-full min-w-0 board-theme-${user?.profile.board_theme ?? 'wood'} lg:max-w-[calc(100vh-26rem)]`}
+            >
               <ChessBoard
                 fen={displayedFen}
                 orientation={userColor}
@@ -471,18 +481,18 @@ export default function Play() {
                 arrows={isBrowsing ? [] : (boardArrows as never[])}
                 resetKey={boardKey}
               />
+              {/* Classification badge for the last classified user move (bot mode only).
+                  Hidden while browsing past positions. */}
+              {!isBrowsing && lastClassifiedMove && lastMoveDestSquare === lastClassifiedMove.uci.slice(2, 4) && (
+                <ClassificationBadge classification={lastClassifiedMove.classification} square={lastClassifiedMove.uci.slice(2, 4)} orientation={userColor} />
+              )}
+              {/* Subtle "browsing past position" overlay tag */}
+              {isBrowsing && (
+                <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full bg-amber-500/90 px-3 py-1 text-xs font-semibold text-white shadow-lift">
+                  {t('play.browsingPast')}
+                </div>
+              )}
             </div>
-            {/* Classification badge for the last classified user move (bot mode only).
-                Hidden while browsing past positions. */}
-            {!isBrowsing && lastClassifiedMove && lastMoveDestSquare === lastClassifiedMove.uci.slice(2, 4) && (
-              <ClassificationBadge classification={lastClassifiedMove.classification} square={lastClassifiedMove.uci.slice(2, 4)} orientation={userColor} />
-            )}
-            {/* Subtle "browsing past position" overlay tag */}
-            {isBrowsing && (
-              <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full bg-amber-500/90 px-3 py-1 text-xs font-semibold text-white shadow-lift">
-                {t('play.browsingPast')}
-              </div>
-            )}
           </div>
           <div className="my-1 flex items-center justify-between gap-2">
             <CapturedPieces fen={fen} side={userColor} />
@@ -491,33 +501,33 @@ export default function Play() {
 
           {/* Rewind nav — visible once at least one move has been played */}
           {phase !== 'setup' && positions.length > 1 && (
-            <div className="mt-3 flex items-center justify-center gap-2">
-              <button onClick={() => setBrowseIndex(0)} disabled={(browseIndex ?? liveIndex) === 0} className="btn-secondary h-11 w-11 p-0" title={t('play.rewindFirst')}><ChevronsLeft className="h-5 w-5" /></button>
-              <button onClick={stepBack} disabled={(browseIndex ?? liveIndex) === 0} className="btn-secondary h-11 w-11 p-0" title={t('play.rewindPrev')}><ChevronLeft className="h-5 w-5" /></button>
-              <div className="flex h-11 min-w-[5.5rem] items-center justify-center rounded-xl bg-ink-100 px-3 font-mono text-sm tabular-nums dark:bg-ink-800">
+            <div className="mt-3 flex items-center justify-center gap-1.5 sm:gap-2">
+              <button onClick={() => setBrowseIndex(0)} disabled={(browseIndex ?? liveIndex) === 0} className="btn-secondary h-10 w-10 p-0 sm:h-11 sm:w-11" title={t('play.rewindFirst')}><ChevronsLeft className="h-5 w-5" /></button>
+              <button onClick={stepBack} disabled={(browseIndex ?? liveIndex) === 0} className="btn-secondary h-10 w-10 p-0 sm:h-11 sm:w-11" title={t('play.rewindPrev')}><ChevronLeft className="h-5 w-5" /></button>
+              <div className="flex h-10 min-w-[5rem] items-center justify-center rounded-xl bg-ink-100 px-3 font-mono text-sm tabular-nums dark:bg-ink-800 sm:h-11 sm:min-w-[5.5rem]">
                 {(browseIndex ?? liveIndex)} / {liveIndex}
               </div>
-              <button onClick={stepForward} disabled={!isBrowsing} className="btn-secondary h-11 w-11 p-0" title={t('play.rewindNext')}><ChevronRight className="h-5 w-5" /></button>
-              <button onClick={goToLive} disabled={!isBrowsing} className={`h-11 px-4 text-sm ${isBrowsing ? 'btn-primary' : 'btn-secondary'}`} title={t('play.rewindLive')}>
+              <button onClick={stepForward} disabled={!isBrowsing} className="btn-secondary h-10 w-10 p-0 sm:h-11 sm:w-11" title={t('play.rewindNext')}><ChevronRight className="h-5 w-5" /></button>
+              <button onClick={goToLive} disabled={!isBrowsing} className={`h-10 px-3 text-sm sm:h-11 sm:px-4 ${isBrowsing ? 'btn-primary' : 'btn-secondary'}`} title={t('play.rewindLive')}>
                 {isBrowsing ? <><Radio className="h-4 w-4" />{t('play.rewindLive')}</> : <ChevronsRight className="h-5 w-5" />}
               </button>
             </div>
           )}
 
           {phase === 'playing' && (
-            <div className="mt-3 flex items-center justify-between gap-2">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm">
                 {isBrowsing ? <span className="font-medium text-amber-600">{t('play.browsingPast')}</span>
                   : previewing ? <Spinner inline label={t('play.checking')} />
                   : turn === userColor ? <span className="font-medium text-accent-600">{t('play.yourTurn')}</span>
                   : <span className="text-ink-500">{t('play.thinking')}</span>}
               </div>
-              <div className="flex gap-2">
-                <button onClick={requestHint} disabled={hintLoading || isBrowsing} className="btn-secondary h-11 px-4 text-sm">
+              <div className="flex flex-wrap gap-2">
+                <button onClick={requestHint} disabled={hintLoading || isBrowsing} className="btn-secondary h-11 px-3 text-sm sm:px-4">
                   {hintLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lightbulb className="h-4 w-4" />}
                   {t('play.hint')}
                 </button>
-                <button onClick={resign} className="btn-danger h-11 px-4 text-sm"><Flag className="h-4 w-4" />{t('play.resign')}</button>
+                <button onClick={resign} className="btn-danger h-11 px-3 text-sm sm:px-4"><Flag className="h-4 w-4" />{t('play.resign')}</button>
               </div>
             </div>
           )}

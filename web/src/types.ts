@@ -16,6 +16,10 @@ export interface AnalyzedMove {
   fen_after: string;
   eval_before_cp: number | null;
   eval_after_cp: number | null;
+  // Mate-in-N (white perspective). Present on v7+ analyses; older cached
+  // analyses are re-run on view because SCORING_VERSION changed.
+  mate_before?: number | null;
+  mate_after?: number | null;
   best_move_uci: string | null;
   best_move_san: string | null;
   best_pv: string[];

@@ -34,7 +34,7 @@ export default function GameReportCard({
 
   return (
     <div className="card overflow-hidden">
-      <div className="grid grid-cols-2 gap-3 p-4 sm:p-5">
+      <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 sm:p-5">
         <PlayerColumn name={whiteName} accuracy={accuracyW} elo={eloW} perf={perfW} side="white" highlighted={userColor === 'white'} />
         <PlayerColumn name={blackName} accuracy={accuracyB} elo={eloB} perf={perfB} side="black" highlighted={userColor === 'black'} />
       </div>

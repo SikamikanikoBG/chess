@@ -4,6 +4,60 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.4.0] — 2026-05-11
+
+This is the code drop matching the 7.1.x / 7.2.0 entries above (board sizing
+rearrangement, MoveRow scroll containment, Home redesign, mobile-friendliness
+pass across Layout/Insights/Settings/admin/Users/Play, GameReportPanel
+double-header removal, AnalyzedMove `mate_before`/`mate_after`, opponent-RD
+fix, env-tunable Stockfish, `ucinewgame` between games, key-moment dedupe
+widened, accuracy floor only when n ≥ 5, forced moves excluded from accuracy
+aggregate, ACPL cap, Brilliant 4-ply recapture replay). Plus the following
+genuinely new work below.
+
+### Changed — analytical engine (SCORING_VERSION 7 → 8)
+
+Calibrated against the Hikaru April 2026 archive (10 blitz games, 20 data
+points). Current state vs chess.com: MAE 5.32 points, mean signed bias
+−0.29, 70% within ±5 pts.
+
+- **Great tightened.** Threshold raised 150 → 200 cp on the only-good-move
+  pattern, AND the v7 "near-best (cpLoss ≤ 30) + only-good-move" alternate
+  pattern is removed entirely. chess.com only tags Great when the player
+  picked engine #1, and the v7 alternate was over-firing (5 Greats per blitz
+  game in benchmark game 2). Pure #1-or-eval-flip Great now.
+- **Accuracy volatility-clamp experiment reverted.** Clamping volatility
+  weight to ≤ 2.0 fixed the worst single-blunder outlier (game 10 W: Δ −21
+  → −3) but pushed bias from ~0 to +5 across the sample because `volMean`
+  drifted toward arithmetic on multi-error games where chess.com punishes
+  harder. Net MAE 5.32 → 5.60. Reverted; documented in the `accuracy.ts`
+  header so future passes don't repeat it.
+
+### Added — chess.com accuracy benchmark harness
+
+New `server/scripts/` directory:
+
+- `benchmark-chesscom.ts` — runs `analyzePgnFull` over a JSON file of real
+  chess.com games and writes a side-by-side report (per-side accuracy, our
+  vs chess.com's reported, MAE / bias / coverage bands, plus classification
+  counts and our estimated Elo per game).
+- `benchmark-games.json` — the Hikaru April 2026 sample (10 games, 37–59
+  plies, ratings 2994–3431, results spread, with chess.com's reported
+  accuracies as the ground truth).
+- `benchmark-report.md` — the report from the most recent run (regenerated
+  by re-running the script).
+
+Run with `npx tsx server/scripts/benchmark-chesscom.ts [depth]`. This is the
+tool that drove the SCORING_VERSION 8 calibration and will continue to gate
+future scoring changes.
+
+### Fixed — Settings: sound + blunder-warning toggles now persist
+
+`Settings.tsx`'s save payload was building `sound_enabled` and
+`blunder_warning` from form state but never including them in the PATCH
+body, so toggling either checkbox had no effect across reloads. Added both
+fields to the payload sent to `/api/profile`.
+
 ## [7.3.0] — 2026-05-11
 
 ### Fixed — mobile board coordinate alignment

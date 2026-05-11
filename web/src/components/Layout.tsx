@@ -187,13 +187,25 @@ export default function Layout({ onOpenPalette, onOpenShortcuts }: LayoutProps) 
       {navOpen && (
         <>
           <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={() => setNavOpen(false)} />
-          <aside className="fixed inset-y-0 right-0 z-50 flex w-72 flex-col bg-chesscom-900 p-4 text-white md:hidden">
-            <div className="mb-4 flex items-center justify-between">
+          <aside className="fixed inset-y-0 right-0 z-50 flex w-72 max-w-[85vw] flex-col overflow-y-auto bg-chesscom-900 p-4 text-white md:hidden">
+            <div className="mb-3 flex items-center justify-between">
               <LogoLockup size={24} />
               <button onClick={() => setNavOpen(false)} className="rounded-lg p-1.5 text-chesscom-300 hover:bg-chesscom-800">
                 <X className="h-5 w-5" />
               </button>
             </div>
+            {user && (
+              <NavLink
+                to="/settings"
+                className="mb-3 flex items-center gap-2 rounded-lg bg-chesscom-800/60 px-3 py-2 hover:bg-chesscom-800"
+              >
+                <span className="text-xl leading-none">{user.profile.avatar_emoji ?? '♟'}</span>
+                <div className="min-w-0 flex-1 leading-tight">
+                  <div className="truncate text-sm font-medium">{user.profile.display_name}</div>
+                  <div className="truncate text-[11px] text-chesscom-400">@{user.username}</div>
+                </div>
+              </NavLink>
+            )}
             <nav className="space-y-1">
               <MobileNavItem to="/" icon={Home} label={t('app.home')} />
               <MobileNavItem to="/play" icon={Swords} label={t('home.playTitle')} />

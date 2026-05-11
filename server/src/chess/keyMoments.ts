@@ -63,11 +63,13 @@ export function extractKeyMoments(moves: AnalyzedMove[], max = 5): KeyMoment[] {
     });
   }
 
-  // Sort by score desc; deduplicate near-adjacent plies (within 2) keeping the higher.
+  // Sort by score desc; deduplicate near-adjacent plies (within 4) keeping the higher.
+  // chess.com's highlight reel spaces moments out — adjacent inaccuracies in
+  // one tactical sequence shouldn't both make the cut.
   candidates.sort((a, b) => b.score - a.score);
   const picked: KeyMoment[] = [];
   for (const c of candidates) {
-    if (picked.some((p) => Math.abs(p.ply - c.ply) <= 2)) continue;
+    if (picked.some((p) => Math.abs(p.ply - c.ply) <= 4)) continue;
     picked.push(c);
     if (picked.length >= max) break;
   }

@@ -6,7 +6,7 @@ import { requireAuth } from '../auth/middleware.js';
 import { StockfishEngine } from '../chess/stockfish.js';
 import {
   classifyByWpDrop, refineClassification, normalizeEval, cpToWinPct,
-  cpLossForPly, moveAccuracy, estimateElo, estimateGamePerformance, BOOK_PLIES,
+  cpLossForPly, cpLossForAcpl, moveAccuracy, estimateElo, estimateGamePerformance, BOOK_PLIES,
   winDropForPly, SCORING_VERSION,
 } from '../chess/classifier.js';
 import { gameAccuracy, type MoveAccPoint } from '../chess/accuracy.js';
@@ -117,7 +117,10 @@ router.post('/', async (c) => {
       score: scoreFromResultForUser(game.result, game.user_color ?? 'white'),
       userColor: game.user_color ?? 'white',
       opponentRating: game.opponent_rating_before,
-      opponentRd: game.user_rd_before, // best available for opponent if not stored separately
+      // Opponent RD is not stored on the games row. Passing our own RD would
+      // silently corrupt the performance-blend confidence weighting. Use null;
+      // estimateGamePerformance defaults to RD=350 (low confidence).
+      opponentRd: null,
     });
     db.prepare(`
       INSERT INTO analyses (game_id, depth, accuracy_white, accuracy_black,
@@ -281,8 +284,15 @@ export async function analyzePgnFull(
   const engine = new StockfishEngine();
   await engine.start();
   await engine.setOption('Skill Level', 20);
-  await engine.setOption('Threads', '2');
-  await engine.setOption('Hash', '128');
+  // Operational tunables — bigger boxes can spend more. Defaults match v6.
+  const threads = Math.max(1, Math.min(16, Number(process.env.STOCKFISH_THREADS) || 2));
+  const hashMb = Math.max(16, Math.min(4096, Number(process.env.STOCKFISH_HASH) || 128));
+  await engine.setOption('Threads', String(threads));
+  await engine.setOption('Hash', String(hashMb));
+  // `ucinewgame` clears the transposition table so this analysis isn't
+  // polluted by state from whatever the engine was doing last (the engine
+  // is reused across plies of *this* PGN but should start fresh per game).
+  await engine.newGame();
 
   // Replay through positions
   const replay = new Chess();
@@ -353,6 +363,19 @@ export async function analyzePgnFull(
     const playerEvalBeforeCp = sideToMove === 'white' ? prevWhiteCp : -prevWhiteCp;
     const playerEvalAfterCp = sideToMove === 'white' ? nextWhiteCp : -nextWhiteCp;
     const cpLoss = cpLossForPly(playerEvalBeforeCp, playerEvalAfterCp);
+    // Capped variant for ACPL aggregation — a single mate-flip ply otherwise
+    // adds 1000/N to the average and tanks estimated Elo by ~400.
+    const cpLossAcpl = cpLossForAcpl(playerEvalBeforeCp, playerEvalAfterCp);
+    // Mate-in-N (white perspective) for the eval bar / graph. The raw cp value
+    // is ±~10000 when the engine sees mate; consumers need the actual M-count
+    // to render "M3" instead of decoding the spike heuristically. The engine
+    // returns mate in side-to-move perspective at each position.
+    const mateBefore = prevEval.mate !== null
+      ? (sideToMove === 'white' ? prevEval.mate : -prevEval.mate)
+      : null;
+    const mateAfter = nextEval.mate !== null
+      ? (sideToMove === 'white' ? -nextEval.mate : nextEval.mate)
+      : null;
     // Mate-aware win-drop: a "+M3 → +M2" sequence is still mating, so the
     // 0.5% drift through the sigmoid shouldn't bleed into accuracy. Spec bug #4.
     const wpDrop = winDropForPly(playerEvalBeforeCp, playerEvalAfterCp, playerWinBefore, playerWinAfter);
@@ -390,14 +413,18 @@ export async function analyzePgnFull(
     });
 
     const isBookMove = cls === 'book';
+    const isForcedMove = cls === 'forced';
+    // Book + Forced are both excluded from the accuracy aggregate: they were
+    // not the player's choice, so penalising them is unfair (chess.com same).
+    const excludeFromAggregate = isBookMove || isForcedMove;
     const acc = moveAccuracy(playerWinBefore, playerWinBefore - wpDrop);
-    const point: MoveAccPoint = { acc, winPct: playerWinAfter, isBook: isBookMove };
+    const point: MoveAccPoint = { acc, winPct: playerWinAfter, isBook: excludeFromAggregate };
     if (sideToMove === 'white') {
       whitePoints.push(point);
-      if (!isBookMove) { whiteCplSum += cpLoss; whiteCplN++; }
+      if (!excludeFromAggregate) { whiteCplSum += cpLossAcpl; whiteCplN++; }
     } else {
       blackPoints.push(point);
-      if (!isBookMove) { blackCplSum += cpLoss; blackCplN++; }
+      if (!excludeFromAggregate) { blackCplSum += cpLossAcpl; blackCplN++; }
     }
 
     moves.push({
@@ -408,6 +435,8 @@ export async function analyzePgnFull(
       fen_after: fenAfter,
       eval_before_cp: prevWhiteCp,
       eval_after_cp: nextWhiteCp,
+      mate_before: mateBefore,
+      mate_after: mateAfter,
       best_move_uci: bestUci,
       best_move_san: bestSan,
       best_pv: pvSan,

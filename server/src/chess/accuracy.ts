@@ -25,6 +25,13 @@
 // and including them inflates accuracy.
 //
 // Spec: .claude/specs/chess-math.md §2.
+//
+// v8 (Hikaru Apr-2026 benchmark): cap per-ply volatility weight at 3.0.
+// A single blunder in a calm game can otherwise hit weight 10+, dragging a
+// "1 bad + 21 great" game from chess.com's 88 → our 67. Cap=2.0 over-softened
+// (multi-error games drifted toward arithmetic mean → +5 bias); cap=3.0 only
+// fires on extreme single-ply outliers, where it matches chess.com's
+// observed forgiveness of isolated errors.
 
 export interface MoveAccPoint {
   acc: number;       // per-move accuracy [0, 100]
@@ -51,13 +58,17 @@ export function gameAccuracy(points: MoveAccPoint[]): number {
   // Window size scales with game length; clamp to [2, 8].
   const windowSize = Math.max(2, Math.min(8, Math.ceil(counted.length / 10)));
 
-  // Volatility-weighted mean
+  // Volatility-weighted mean. Per-ply weight is window-stdev (sharp positions
+  // weight more). Clamp at 3.0 so a single anomalous spike (one blunder in a
+  // calm game) can't dominate — uncapped, that one ply could land 10–15× the
+  // floor weight and tank a 22-move "1 bad + 21 great" game to 67% when
+  // chess.com calls it 88%.
   const weights: number[] = [];
   for (let i = 0; i < counted.length; i++) {
     const start = Math.max(0, i - Math.floor(windowSize / 2));
     const end = Math.min(counted.length, start + windowSize);
     const window = wins.slice(start, end);
-    weights.push(Math.max(0.5, stdev(window)));
+    weights.push(Math.max(0.5, Math.min(3.0, stdev(window))));
   }
   const wSum = weights.reduce((a, b) => a + b, 0) || 1;
   const accSum = accs.reduce((a, v, i) => a + (weights[i]! * v), 0);
@@ -65,10 +76,11 @@ export function gameAccuracy(points: MoveAccPoint[]): number {
 
   // Harmonic mean with a 3rd-worst floor. The k-th worst move's accuracy
   // caps the per-move penalty for moves ranked worse than k — so a 4th blunder
-  // doesn't drag the score the same way a single blunder does. k = 3, or
-  // n - 1 if the game is shorter than 4 plies.
+  // doesn't drag the score the same way a single blunder does. k = 3, but
+  // only applied when n ≥ 5; on shorter games the floor becomes the median
+  // and the aggregate collapses onto the worst move.
   const sortedAccs = [...accs].sort((a, b) => a - b);
-  const floor = sortedAccs[Math.min(2, counted.length - 1)] ?? 0;
+  const floor = counted.length >= 5 ? (sortedAccs[2] ?? 0) : 0;
   const clamped = accs.map((a) => Math.max(a, floor));
   const inv = clamped.reduce((a, v) => a + 1 / Math.max(1, v), 0);
   const harmonic = counted.length / inv;

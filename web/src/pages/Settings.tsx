@@ -41,6 +41,8 @@ export default function Settings() {
       board_theme: form.board_theme,
       piece_set: form.piece_set,
       site_theme: form.site_theme,
+      sound_enabled: !!form.sound_enabled,
+      blunder_warning: !!form.blunder_warning,
     });
     await i18n.changeLanguage(form.language);
     await refresh();
@@ -132,7 +134,7 @@ export default function Settings() {
         <div className="space-y-6 p-5">
           <div>
             <label className="label mb-2 block">{t('settings.siteTheme')}</label>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {(['light','dark','auto'] as SiteTheme[]).map((th) => (
                 <SiteThemeOption key={th} value={th} selected={form.site_theme === th} onPick={() => set('site_theme', th)} label={t(`settings.siteTheme${th[0]!.toUpperCase()}${th.slice(1)}`)} />
               ))}
@@ -140,7 +142,7 @@ export default function Settings() {
           </div>
           <div>
             <label className="label mb-2 block">{t('settings.boardTheme')}</label>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {(['wood','green','blue'] as BoardTheme[]).map((th) => (
                 <BoardThemeOption key={th} value={th} selected={form.board_theme === th} onPick={() => set('board_theme', th)} label={t(`settings.board${th[0]!.toUpperCase()}${th.slice(1)}`)} />
               ))}

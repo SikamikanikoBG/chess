@@ -1,17 +1,22 @@
-import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import * as Icons from 'lucide-react';
-import { Swords, BookOpen, Settings as SettingsIcon, ChevronRight, Trophy, Frown, Equal, Flame, Target, Activity, Download, Sparkles, BarChart3, ListChecks, Award, X } from 'lucide-react';
+import {
+  Swords, BookOpen, ChevronRight, Target, Sparkles,
+  ListChecks, Award, ArrowRight,
+} from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../state/auth';
 import { api } from '../api';
 import { fmtAccuracy } from '../lib/utils';
 import type { GameRow } from '../types';
 
-const APP_VERSION = 'v7.0.0';
-const CHANGELOG_KEY = 'patzer.lastSeenChangelog';
+// Home — quieter, more hierarchical than the v7.1 design.
+// One hero (greeting + stats inline + primary action), one "continue" row of
+// at most three compact tiles, one slim recent-games list. No standalone
+// stats strip, no "what's new" toast (footer chip handles that), no kitschy
+// hero ornaments.
 
 type Achievement = {
   id: string;
@@ -45,338 +50,220 @@ interface Stats {
   streak: { kind: 'win' | 'loss' | 'draw'; count: number } | null;
 }
 
-interface TrainStats { total: number; solved: number; failed: number; accuracy: number }
-
-interface InsightsLite {
-  accuracy_trend: { t: string; acc: number; result: string | null }[];
-  opening_repertoire: { eco: string; name: string; played: number; wins: number; draws: number; losses: number; color: 'white' | 'black' }[];
+interface NextPuzzle {
+  puzzle: { game_id: number; ply: number; played_san: string; classification: string; white: string; black: string } | null;
 }
-
-interface NextPuzzle { puzzle: { game_id: number; ply: number; played_san: string; classification: string; white: string; black: string } | null }
 
 export default function Home() {
   const { t } = useTranslation();
   const { user } = useAuth();
 
-  const { data: gamesData, isLoading } = useQuery({
+  const { data: gamesData } = useQuery({
     queryKey: ['games', 'home'],
-    queryFn: () => api.get<{ games: GameRow[] }>('/api/games?limit=4'),
+    queryFn: () => api.get<{ games: GameRow[] }>('/api/games?limit=5'),
   });
-
   const { data: stats } = useQuery({
     queryKey: ['stats', 'me'],
     queryFn: () => api.get<Stats>('/api/stats/me'),
   });
-
-  const { data: trainStats } = useQuery({
-    queryKey: ['train-stats'],
-    queryFn: () => api.get<TrainStats>('/api/train/stats'),
-  });
-
-  const { data: insights } = useQuery({
-    queryKey: ['insights-home'],
-    queryFn: () => api.get<InsightsLite>('/api/insights/v2'),
-  });
-
   const { data: nextPuzzle } = useQuery({
     queryKey: ['train-next'],
     queryFn: () => api.get<NextPuzzle>('/api/train/next'),
   });
-
   const { data: planData } = useQuery({
     queryKey: ['plan-home'],
     queryFn: () => api.get<{ goals: PlanGoal[] }>('/api/plan'),
   });
-
   const { data: achievementsData } = useQuery({
     queryKey: ['achievements-home'],
     queryFn: () => api.get<{ achievements: Achievement[] }>('/api/achievements'),
   });
 
   const games = gamesData?.games ?? [];
-  const topOpening = insights?.opening_repertoire?.[0] ?? null;
-
-  // What's new toast — surface v7.0.0 highlights once.
-  const [showWhatsNew, setShowWhatsNew] = useState(false);
-  useEffect(() => {
-    try {
-      const seen = localStorage.getItem(CHANGELOG_KEY);
-      if (seen !== APP_VERSION) setShowWhatsNew(true);
-    } catch {
-      // localStorage unavailable — ignore.
-    }
-  }, []);
-  function dismissWhatsNew() {
-    try { localStorage.setItem(CHANGELOG_KEY, APP_VERSION); } catch { /* ignore */ }
-    setShowWhatsNew(false);
-  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      {/* Hero Play tile */}
-      <motion.section
-        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-        className="grid gap-4 md:grid-cols-[1.4fr_1fr]"
-      >
-        <Link to="/play" className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-board-dark via-[#5d7d3f] to-chesscom-700 p-6 text-white shadow-lift transition-transform hover:-translate-y-0.5 sm:p-8">
-          <div className="relative z-10 flex h-full flex-col">
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15 text-3xl backdrop-blur">
-                {user?.profile.avatar_emoji ?? '♟'}
-              </div>
-              <div>
-                <div className="text-xs uppercase tracking-wider text-white/60">{t('login.title')}</div>
-                <h1 className="text-2xl font-bold sm:text-3xl">
-                  {t('home.greeting', { name: user?.profile.display_name ?? '' })}
-                </h1>
-              </div>
+      <Hero
+        displayName={user?.profile.display_name ?? ''}
+        avatar={user?.profile.avatar_emoji ?? '♟'}
+        stats={stats ?? null}
+        tagline={t('app.tagline')}
+      />
+
+      <ContinueRow
+        puzzle={nextPuzzle?.puzzle ?? null}
+        goals={planData?.goals ?? null}
+        achievements={achievementsData?.achievements ?? null}
+        playerName={user?.profile.display_name ?? ''}
+      />
+
+      <RecentGames games={games} />
+    </div>
+  );
+}
+
+/* ───────────────────────────────  HERO  ────────────────────────────────── */
+
+function Hero({ displayName, avatar, stats, tagline }: {
+  displayName: string; avatar: string; stats: Stats | null; tagline: string;
+}) {
+  const { t } = useTranslation();
+  const hour = new Date().getHours();
+  const greetingKey = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
+  const greeting = t(`home.greet.${greetingKey}`, {
+    defaultValue: greetingKey === 'morning' ? 'Good morning'
+      : greetingKey === 'afternoon' ? 'Good afternoon' : 'Good evening',
+  });
+
+  const hasGames = stats && stats.total > 0;
+  const winPct = stats && stats.total ? Math.round((stats.wins / stats.total) * 100) : 0;
+
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: 'easeOut' }}
+      className="relative isolate overflow-hidden rounded-2xl bg-gradient-to-br from-chesscom-900 via-[#3b4c2f] to-board-dark text-white shadow-lift"
+    >
+      {/* Background pattern — a subtle chess-board grid that fades to the
+          edges. SVG inline so it ships as a data-URI; no extra request. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.08] [mask-image:radial-gradient(ellipse_at_top_right,black_30%,transparent_75%)]"
+        style={{
+          backgroundImage:
+            "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 2 2' shape-rendering='crispEdges'><rect width='2' height='2' fill='%23ffffff' opacity='0'/><rect x='1' width='1' height='1' fill='%23ffffff'/><rect y='1' width='1' height='1' fill='%23ffffff'/></svg>\")",
+          backgroundSize: '56px 56px',
+        }}
+      />
+
+      <div className="relative grid gap-6 p-6 sm:p-8 md:grid-cols-[1fr_auto] md:items-end">
+        <div className="min-w-0">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/15 text-2xl backdrop-blur">
+              {avatar}
             </div>
-            <p className="mt-3 max-w-md text-sm text-white/80">
-              {t('app.tagline')}
-            </p>
-            <div className="mt-auto pt-6">
-              <span className="inline-flex items-center gap-2 rounded-md bg-white px-4 py-2.5 text-sm font-bold text-chesscom-900 shadow-soft transition-transform group-hover:translate-x-1">
-                <Swords className="h-4 w-4 text-green-500" /> {t('home.playTitle')}
-              </span>
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-white/55">{greeting}</div>
+              <h1 className="truncate text-2xl font-bold tracking-tight sm:text-3xl">{displayName}</h1>
             </div>
           </div>
-          <svg className="pointer-events-none absolute -right-10 -top-10 hidden h-72 w-72 opacity-20 sm:block" viewBox="0 0 8 8" shapeRendering="crispEdges">
-            {Array.from({ length: 64 }).map((_, i) => {
-              const x = i % 8; const y = Math.floor(i / 8);
-              return <rect key={i} x={x} y={y} width={1} height={1} fill={(x + y) % 2 === 0 ? '#eeeed2' : '#769656'} />;
-            })}
-          </svg>
-        </Link>
 
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-1">
-          <Link to="/review" className="card-hover flex items-center gap-3 p-4">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gold-500/15 text-gold-600">
-              <BookOpen className="h-5 w-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold">{t('home.reviewTitle')}</div>
-              <div className="truncate text-xs text-chesscom-500">{t('home.reviewDesc')}</div>
-            </div>
-            <ChevronRight className="h-4 w-4 text-chesscom-400" />
-          </Link>
-          <Link to="/insights" className="card-hover flex items-center gap-3 p-4">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-board-dark/15 text-board-dark">
-              <BarChart3 className="h-5 w-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold">{t('insights.title', { defaultValue: 'Insights' })}</div>
-              <div className="truncate text-xs text-chesscom-500">{t('insights.sub2', { defaultValue: 'Spot your weak patterns' })}</div>
-            </div>
-            <ChevronRight className="h-4 w-4 text-chesscom-400" />
-          </Link>
-        </div>
-      </motion.section>
-
-      {/* First-run empty state */}
-      {stats && stats.total === 0 && (
-        <section className="card-hover relative overflow-hidden border-dashed">
-          <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-board-dark/15 text-board-dark">
-                <Sparkles className="h-5 w-5" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold">{t('home.firstRunTitle', { defaultValue: 'Play your first game' })}</h3>
-                <p className="mt-1 text-sm text-chesscom-500 dark:text-chesscom-300">
-                  {user?.profile.chesscom_username
-                    ? t('home.firstRunReady', { defaultValue: 'Ready to go. Hop into Play vs Bot — or import your Chess.com games to review.' })
-                    : t('home.firstRunNoUsername', { defaultValue: 'Pick an opponent and a time control, or set your Chess.com username in Settings to import existing games.' })}
-                </p>
-              </div>
-            </div>
-            <div className="flex shrink-0 gap-2">
-              <Link to="/play" className="btn-primary text-sm">
-                <Swords className="h-4 w-4" /> {t('home.playTitle')}
-              </Link>
-              {user?.profile.chesscom_username ? (
-                <Link to="/review" className="btn-secondary text-sm">
-                  <Download className="h-4 w-4" /> {t('home.importGames', { defaultValue: 'Import games' })}
-                </Link>
-              ) : (
-                <Link to="/settings" className="btn-secondary text-sm">
-                  <SettingsIcon className="h-4 w-4" /> {t('home.setUsername', { defaultValue: 'Set username' })}
-                </Link>
+          {hasGames ? (
+            <div className="mt-5 flex flex-wrap items-baseline gap-x-5 gap-y-1 text-sm text-white/75">
+              <StatInline value={stats!.total.toLocaleString()} label={t('home.statGames', { defaultValue: 'games' })} />
+              <StatInline value={`${winPct}%`} label={t('home.statWinRate', { defaultValue: 'win rate' })} />
+              {stats!.avg_accuracy != null && (
+                <StatInline value={`${stats!.avg_accuracy}%`} label={t('home.statAccuracy', { defaultValue: 'accuracy' })} />
+              )}
+              {stats!.streak && (
+                <StatInline
+                  value={`${stats!.streak.count}`}
+                  label={t(`home.streak.${stats!.streak.kind}`, { defaultValue: `${stats!.streak.kind} streak` })}
+                  glow={stats!.streak.kind === 'win'}
+                />
               )}
             </div>
-          </div>
-        </section>
-      )}
-
-      {/* Stats strip with sparkline */}
-      {stats && stats.total > 0 && (
-        <section>
-          <div className="mb-3 flex items-center gap-2">
-            <Activity className="h-4 w-4 text-board-dark" />
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-chesscom-500">{t('home.yourStats', { defaultValue: 'Your stats' })}</h2>
-          </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatCard icon={Activity} label={t('home.statGames', { defaultValue: 'Games' })} value={String(stats.total)} sublabel={`${stats.wins}W · ${stats.draws}D · ${stats.losses}L`} />
-            <StatCard icon={Trophy} label={t('home.statWinRate', { defaultValue: 'Win rate' })} value={`${Math.round((stats.wins / Math.max(1, stats.total)) * 100)}%`} sublabel={stats.wins ? `${stats.wins} wins` : undefined} />
-            <StatCard
-              icon={Target}
-              label={t('home.statAccuracy', { defaultValue: 'Avg accuracy' })}
-              value={stats.avg_accuracy != null ? `${stats.avg_accuracy}%` : '—'}
-              sublabel={t('home.acrossAnalyzed', { defaultValue: 'across analyzed games' })}
-              chart={insights?.accuracy_trend && insights.accuracy_trend.length > 1 ? <Sparkline values={insights.accuracy_trend.map((p) => p.acc)} /> : undefined}
-            />
-            <StatCard icon={Flame} label={t('home.statStreak', { defaultValue: 'Streak' })} value={stats.streak ? `${stats.streak.count} ${stats.streak.kind}` : '—'} highlight={stats.streak?.kind === 'win'} />
-          </div>
-        </section>
-      )}
-
-      {/* Plan + Achievements */}
-      <motion.section
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.05, duration: 0.25 }}
-        className="grid gap-3 md:grid-cols-2"
-      >
-        <PlanTile goals={planData?.goals ?? null} />
-        <AchievementsTile achievements={achievementsData?.achievements ?? null} />
-      </motion.section>
-
-      {/* Today's tactic + Top opening */}
-      {(nextPuzzle?.puzzle || topOpening) && (
-        <section className="grid gap-3 md:grid-cols-2">
-          {nextPuzzle?.puzzle && (
-            <Link to="/train" className="card-hover relative overflow-hidden p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-mistake/15 text-mistake">
-                  <Target className="h-5 w-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-chesscom-500">{t('home.todayPuzzle', { defaultValue: "Today's puzzle" })}</div>
-                  <div className="mt-0.5 truncate text-sm font-semibold text-chesscom-900 dark:text-chesscom-100">
-                    {t('home.todayPuzzleTitle', { defaultValue: "You played {{san}}. Find a stronger move.", san: nextPuzzle.puzzle.played_san })}
-                  </div>
-                  <div className="mt-1 truncate text-[11px] text-chesscom-500">
-                    {t('home.fromGame', { defaultValue: 'From your game vs {{opp}}', opp: user?.profile.display_name === nextPuzzle.puzzle.white ? nextPuzzle.puzzle.black : nextPuzzle.puzzle.white })}
-                    {trainStats && trainStats.total > 0 && <> · {trainStats.solved}/{trainStats.total} solved</>}
-                  </div>
-                </div>
-                <ChevronRight className="h-4 w-4 text-chesscom-400" />
-              </div>
-            </Link>
+          ) : (
+            <p className="mt-4 max-w-xl text-sm leading-relaxed text-white/75">{tagline}</p>
           )}
-          {topOpening && (
-            <Link to="/insights" className="card-hover p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gold-500/15 text-gold-600">
-                  <BookOpen className="h-5 w-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-chesscom-500">{t('home.topOpening', { defaultValue: 'Your top opening' })}</div>
-                  <div className="mt-0.5 truncate text-sm font-semibold">{topOpening.name}</div>
-                  <div className="mt-1 truncate text-[11px] text-chesscom-500">
-                    {topOpening.played} games · {topOpening.wins}W / {topOpening.draws}D / {topOpening.losses}L · {topOpening.color === 'white' ? '♔' : '♚'}
-                  </div>
-                </div>
-                <ChevronRight className="h-4 w-4 text-chesscom-400" />
-              </div>
-            </Link>
-          )}
-        </section>
-      )}
+        </div>
 
-      {/* What's new — small dismissible badge */}
-      {showWhatsNew && (
-        <motion.div
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="card flex items-center gap-3 p-3"
-        >
-          <span className="inline-flex h-7 shrink-0 items-center rounded-full bg-gold-500/15 px-2.5 text-[10px] font-bold uppercase tracking-wider text-gold-600">
-            {APP_VERSION}
-          </span>
-          <div className="min-w-0 flex-1 text-xs text-chesscom-600 dark:text-chesscom-300">
-            {t('home.whatsNew', { defaultValue: "What's new: plans, achievements, and a top-3 lines panel in Review." })}
-          </div>
-          <button onClick={dismissWhatsNew} className="btn-ghost p-1.5 text-chesscom-500" title={t('common.cancel')}>
-            <X className="h-3.5 w-3.5" />
-          </button>
+        <div className="flex flex-wrap gap-2 md:flex-col md:items-end">
+          <Link
+            to="/play"
+            className="group inline-flex items-center gap-2 rounded-md bg-green-500 px-5 py-2.5 text-sm font-bold text-white shadow-soft transition-all hover:bg-green-600 hover:shadow-lift focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-chesscom-900"
+          >
+            <Swords className="h-4 w-4" />
+            {t('home.playTitle')}
+            <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+          </Link>
+          <Link
+            to="/review"
+            className="inline-flex items-center gap-2 rounded-md bg-white/10 px-4 py-2 text-xs font-medium text-white/90 backdrop-blur transition-colors hover:bg-white/15 hover:text-white"
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            {t('home.reviewTitle')}
+          </Link>
+        </div>
+      </div>
+    </motion.section>
+  );
+}
+
+function StatInline({ value, label, glow }: { value: string; label: string; glow?: boolean }) {
+  return (
+    <span className="inline-flex items-baseline gap-1.5">
+      <span className={`font-mono text-xl font-semibold tabular-nums ${glow ? 'text-gold-300' : 'text-white'}`}>
+        {value}
+      </span>
+      <span className="text-[11px] uppercase tracking-wider text-white/55">{label}</span>
+    </span>
+  );
+}
+
+/* ───────────────────────  CONTINUE YOUR JOURNEY  ───────────────────────── */
+
+function ContinueRow({ puzzle, goals, achievements, playerName }: {
+  puzzle: NextPuzzle['puzzle'];
+  goals: PlanGoal[] | null;
+  achievements: Achievement[] | null;
+  playerName: string;
+}) {
+  // Stagger entrance — modest. 60ms between cards, no scale or rotate gimmicks.
+  const variants = {
+    hidden: { opacity: 0, y: 8 },
+    show: (i: number) => ({ opacity: 1, y: 0, transition: { delay: 0.05 + i * 0.06, duration: 0.3, ease: 'easeOut' as const } }),
+  };
+
+  return (
+    <section>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <motion.div initial="hidden" animate="show" custom={0} variants={variants}>
+          <PuzzleTile puzzle={puzzle} playerName={playerName} />
         </motion.div>
-      )}
-
-      {/* Recent games */}
-      {!isLoading && games.length > 0 && (
-        <section>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-chesscom-500">{t('home.recentGames', { defaultValue: 'Recent games' })}</h2>
-            <Link to="/review" className="text-xs font-medium text-board-dark hover:text-board-dark/80">
-              {t('home.viewAll', { defaultValue: 'View all →' })}
-            </Link>
-          </div>
-          <div className="grid gap-2">
-            {games.map((g) => (
-              <Link key={g.id} to={`/review/${g.id}`}
-                className="card-hover flex items-center gap-3 p-3">
-                <ResultIcon r={g.result} />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">
-                    {g.user_color === 'white'
-                      ? <><span className="text-chesscom-900 dark:text-chesscom-100">{g.white}</span> <span className="text-chesscom-400">vs</span> {g.black}</>
-                      : <>{g.white} <span className="text-chesscom-400">vs</span> <span className="text-chesscom-900 dark:text-chesscom-100">{g.black}</span></>}
-                    <span className="ml-2 text-[11px] text-chesscom-400">{g.time_control}</span>
-                  </div>
-                  <div className="text-[11px] text-chesscom-500">{new Date(g.end_time).toLocaleString()}</div>
-                </div>
-                {g.analyzed ? (
-                  <div className="text-right text-[11px]">
-                    <div className="text-chesscom-400">accuracy</div>
-                    <div className="font-mono font-semibold tabular-nums">
-                      <span>{fmtAccuracy(g.accuracy_white)}</span>
-                      <span className="mx-1 text-chesscom-400">/</span>
-                      <span>{fmtAccuracy(g.accuracy_black)}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <span className="badge bg-chesscom-100 text-chesscom-500 dark:bg-chesscom-700 dark:text-chesscom-300">unreviewed</span>
-                )}
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
-    </div>
+        <motion.div initial="hidden" animate="show" custom={1} variants={variants}>
+          <PlanTile goals={goals} />
+        </motion.div>
+        <motion.div initial="hidden" animate="show" custom={2} variants={variants}>
+          <AchievementsTile achievements={achievements} />
+        </motion.div>
+      </div>
+    </section>
   );
 }
 
-function StatCard({ icon: Icon, label, value, sublabel, highlight, chart }: { icon: React.ElementType; label: string; value: string; sublabel?: string; highlight?: boolean; chart?: React.ReactNode }) {
+function PuzzleTile({ puzzle, playerName }: { puzzle: NextPuzzle['puzzle']; playerName: string }) {
+  const { t } = useTranslation();
+  if (!puzzle) {
+    return (
+      <Link to="/train" className="card-hover flex h-full items-start gap-3 p-4">
+        <Pill tone="muted" Icon={Target} />
+        <div className="min-w-0 flex-1">
+          <Kicker>{t('home.todayPuzzle', { defaultValue: "Today's puzzle" })}</Kicker>
+          <Title>{t('home.puzzleEmpty', { defaultValue: 'No puzzles yet — play a few games' })}</Title>
+          <Sub>{t('home.puzzleEmptyDesc', { defaultValue: 'Puzzles come from your own analyzed blunders.' })}</Sub>
+        </div>
+        <ChevronRight className="h-4 w-4 shrink-0 text-chesscom-400" />
+      </Link>
+    );
+  }
+  const opponent = playerName === puzzle.white ? puzzle.black : puzzle.white;
   return (
-    <div className={`card flex flex-col gap-1 p-4 ${highlight ? 'ring-2 ring-gold-500/30' : ''}`}>
-      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-chesscom-500">
-        <Icon className="h-3.5 w-3.5" />
-        {label}
+    <Link to="/train" className="card-hover flex h-full items-start gap-3 p-4">
+      <Pill tone="mistake" Icon={Target} />
+      <div className="min-w-0 flex-1">
+        <Kicker>{t('home.todayPuzzle', { defaultValue: "Today's puzzle" })}</Kicker>
+        <Title>
+          {t('home.todayPuzzleTitle', {
+            defaultValue: 'You played {{san}}. Find a stronger move.',
+            san: puzzle.played_san,
+          })}
+        </Title>
+        <Sub>{t('home.fromGame', { defaultValue: 'From your game vs {{opp}}', opp: opponent })}</Sub>
       </div>
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="font-mono text-2xl font-bold tabular-nums">{value}</div>
-        {chart && <div className="opacity-90">{chart}</div>}
-      </div>
-      {sublabel && <div className="text-[11px] text-chesscom-400">{sublabel}</div>}
-    </div>
-  );
-}
-
-function Sparkline({ values }: { values: number[] }) {
-  if (values.length < 2) return null;
-  const W = 64, H = 22;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = Math.max(1, max - min);
-  const path = values.map((v, i) => {
-    const x = (i / (values.length - 1)) * (W - 2) + 1;
-    const y = H - 1 - ((v - min) / range) * (H - 2);
-    return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ');
-  return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="text-board-dark">
-      <path d={path} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+      <ChevronRight className="h-4 w-4 shrink-0 text-chesscom-400" />
+    </Link>
   );
 }
 
@@ -390,49 +277,49 @@ function PlanTile({ goals }: { goals: PlanGoal[] | null }) {
 
   if (active.length === 0) {
     return (
-      <Link to="/plan" className="card-hover flex items-start gap-3 p-5">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-board-dark/15 text-board-dark">
-          <ListChecks className="h-5 w-5" />
-        </div>
+      <Link to="/plan" className="card-hover flex h-full items-start gap-3 p-4">
+        <Pill tone="board" Icon={ListChecks} />
         <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-chesscom-500">{t('home.planLabel', { defaultValue: "This week's plan" })}</div>
-          <div className="mt-0.5 text-sm font-semibold">{t('home.planEmpty', { defaultValue: 'Build your first improvement plan' })}</div>
-          <div className="mt-1 truncate text-[11px] text-chesscom-500">
-            {t('home.planEmptyDesc', { defaultValue: 'Pick a few weekly goals — puzzles, openings, accuracy.' })}
-          </div>
+          <Kicker>{t('home.planLabel', { defaultValue: "This week's plan" })}</Kicker>
+          <Title>{t('home.planEmpty', { defaultValue: 'Build your first improvement plan' })}</Title>
+          <Sub>{t('home.planEmptyDesc', { defaultValue: 'Pick a few weekly goals — puzzles, openings, accuracy.' })}</Sub>
         </div>
-        <ChevronRight className="h-4 w-4 text-chesscom-400" />
+        <ChevronRight className="h-4 w-4 shrink-0 text-chesscom-400" />
       </Link>
     );
   }
 
   const pct = imminent ? Math.min(100, Math.round((imminent.progress / Math.max(1, imminent.target)) * 100)) : 0;
   return (
-    <Link to="/plan" className="card-hover p-5">
-      <div className="flex items-start gap-3">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-board-dark/15 text-board-dark">
-          <ListChecks className="h-5 w-5" />
+    <Link to="/plan" className="card-hover flex h-full items-start gap-3 p-4">
+      <Pill tone="board" Icon={ListChecks} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <Kicker>{t('home.planLabel', { defaultValue: "This week's plan" })}</Kicker>
+          <span className="font-mono text-[10px] tabular-nums text-chesscom-500">
+            {active.length} {t('home.planActive', { defaultValue: 'active' })}
+          </span>
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline justify-between gap-2">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-chesscom-500">{t('home.planLabel', { defaultValue: "This week's plan" })}</div>
-            <div className="font-mono text-[10px] tabular-nums text-chesscom-500">{active.length} {t('home.planActive', { defaultValue: 'active' })}</div>
-          </div>
-          {imminent && (
-            <>
-              <div className="mt-0.5 truncate text-sm font-semibold">{imminent.title}</div>
-              <div className="mt-1 truncate text-[11px] text-chesscom-500">{imminent.description}</div>
-              <div className="mt-2 flex items-center gap-2">
-                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-chesscom-100 dark:bg-chesscom-900">
-                  <div className="h-full bg-board-dark transition-all" style={{ width: `${pct}%` }} />
-                </div>
-                <span className="font-mono text-[10px] tabular-nums text-chesscom-500">{imminent.progress}/{imminent.target}</span>
+        {imminent && (
+          <>
+            <Title>{imminent.title}</Title>
+            <div className="mt-2 flex items-center gap-2">
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-chesscom-100 dark:bg-chesscom-900">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${pct}%` }}
+                  transition={{ delay: 0.4, duration: 0.6, ease: 'easeOut' }}
+                  className="h-full bg-board-dark"
+                />
               </div>
-            </>
-          )}
-        </div>
-        <ChevronRight className="h-4 w-4 text-chesscom-400" />
+              <span className="font-mono text-[10px] tabular-nums text-chesscom-500">
+                {imminent.progress}/{imminent.target}
+              </span>
+            </div>
+          </>
+        )}
       </div>
+      <ChevronRight className="h-4 w-4 shrink-0 text-chesscom-400" />
     </Link>
   );
 }
@@ -445,47 +332,28 @@ function AchievementsTile({ achievements }: { achievements: Achievement[] | null
     .sort((a, b) => new Date(b.unlocked_at ?? 0).getTime() - new Date(a.unlocked_at ?? 0).getTime())
     .slice(0, 3);
 
-  if (list.length > 0 && unlocked.length === 0) {
-    return (
-      <Link to="/insights#achievements" className="card-hover flex items-start gap-3 p-5">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gold-500/15 text-gold-600">
-          <Award className="h-5 w-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-chesscom-500">{t('home.achievementsLabel', { defaultValue: 'Achievements' })}</div>
-          <div className="mt-0.5 text-sm font-semibold">{t('home.achievementsEmpty', { defaultValue: 'Earn your first badge by playing a game' })}</div>
-          <div className="mt-1 truncate text-[11px] text-chesscom-500">
-            {t('home.achievementsEmptyDesc', { defaultValue: '0 of {{n}} unlocked', n: list.length })}
-          </div>
-        </div>
-        <ChevronRight className="h-4 w-4 text-chesscom-400" />
-      </Link>
-    );
-  }
-
   return (
-    <Link to="/insights#achievements" className="card-hover p-5">
-      <div className="flex items-start gap-3">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gold-500/15 text-gold-600">
-          <Award className="h-5 w-5" />
+    <Link to="/insights#achievements" className="card-hover flex h-full items-start gap-3 p-4">
+      <Pill tone="gold" Icon={Award} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <Kicker>{t('home.achievementsLabel', { defaultValue: 'Achievements' })}</Kicker>
+          <span className="font-mono text-[10px] tabular-nums text-chesscom-500">
+            {unlocked.length}/{list.length || '—'}
+          </span>
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline justify-between gap-2">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-chesscom-500">{t('home.achievementsLabel', { defaultValue: 'Achievements' })}</div>
-            <div className="font-mono text-[10px] tabular-nums text-chesscom-500">{unlocked.length}/{list.length || '—'}</div>
-          </div>
-          <div className="mt-1 truncate text-sm font-semibold">
-            {recent.length > 0
-              ? t('home.achievementsRecent', { defaultValue: 'Recently unlocked' })
-              : t('home.achievementsLabel', { defaultValue: 'Achievements' })}
-          </div>
-          {recent.length > 0 && (
+        {recent.length > 0 ? (
+          <>
+            <Title>{recent[0]!.title}</Title>
             <div className="mt-2 flex items-center gap-1.5">
               {recent.map((a) => {
                 const Icon = resolveIcon(a.icon);
                 return (
-                  <span key={a.id} title={a.title}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-gold-500/15 text-gold-600 ring-1 ring-gold-500/30">
+                  <span
+                    key={a.id}
+                    title={a.title}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-gold-500/15 text-gold-600 ring-1 ring-gold-500/30"
+                  >
                     <Icon className="h-3.5 w-3.5" />
                   </span>
                 );
@@ -494,21 +362,173 @@ function AchievementsTile({ achievements }: { achievements: Achievement[] | null
                 <span className="text-[10px] text-chesscom-500">+{unlocked.length - 3}</span>
               )}
             </div>
-          )}
-        </div>
-        <ChevronRight className="h-4 w-4 text-chesscom-400" />
+          </>
+        ) : (
+          <>
+            <Title>{t('home.achievementsEmpty', { defaultValue: 'Earn your first badge' })}</Title>
+            <Sub>{t('home.achievementsEmptyDesc', { defaultValue: 'Play and analyze a game to unlock.', n: list.length })}</Sub>
+          </>
+        )}
       </div>
+      <ChevronRight className="h-4 w-4 shrink-0 text-chesscom-400" />
     </Link>
+  );
+}
+
+/* ─────────────────────────────  RECENT GAMES  ──────────────────────────── */
+
+function RecentGames({ games }: { games: GameRow[] }) {
+  const { t } = useTranslation();
+  if (games.length === 0) {
+    return (
+      <motion.section
+        initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.25, duration: 0.3 }}
+        className="card flex items-start gap-3 p-5"
+      >
+        <Pill tone="board" Icon={Sparkles} />
+        <div className="min-w-0 flex-1">
+          <Title>{t('home.firstRunTitle', { defaultValue: 'Play your first game' })}</Title>
+          <Sub>{t('home.firstRunReady', { defaultValue: 'Hop into Play vs Bot — or import your Chess.com games to review.' })}</Sub>
+        </div>
+      </motion.section>
+    );
+  }
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.18, duration: 0.3 }}
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-semibold tracking-tight text-chesscom-900 dark:text-chesscom-100">
+          {t('home.recentGames', { defaultValue: 'Recent games' })}
+        </h2>
+        <Link to="/review" className="text-xs font-medium text-board-dark hover:underline">
+          {t('home.viewAll', { defaultValue: 'View all →' })}
+        </Link>
+      </div>
+      <ul className="divide-y divide-chesscom-100 overflow-hidden rounded-xl border border-chesscom-200 bg-white shadow-soft dark:divide-chesscom-800 dark:border-chesscom-700 dark:bg-chesscom-800">
+        {games.map((g) => (
+          <li key={g.id}>
+            <Link
+              to={`/review/${g.id}`}
+              className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-chesscom-50 dark:hover:bg-chesscom-900/40 sm:px-4 sm:py-3"
+            >
+              <ResultGlyph r={g.result} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">
+                  {g.user_color === 'white' ? (
+                    <>
+                      <span className="text-chesscom-900 dark:text-chesscom-100">{g.white}</span>
+                      <span className="mx-1.5 text-chesscom-400">vs</span>
+                      <span className="text-chesscom-500">{g.black}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-chesscom-500">{g.white}</span>
+                      <span className="mx-1.5 text-chesscom-400">vs</span>
+                      <span className="text-chesscom-900 dark:text-chesscom-100">{g.black}</span>
+                    </>
+                  )}
+                </div>
+                <div className="text-[11px] text-chesscom-500">
+                  <span>{new Date(g.end_time).toLocaleDateString()}</span>
+                  <span className="mx-1.5 text-chesscom-400">·</span>
+                  <span>{g.time_control}</span>
+                  {g.opening_name && (
+                    <span className="hidden sm:inline">
+                      <span className="mx-1.5 text-chesscom-400">·</span>
+                      <span className="truncate">{g.opening_name}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="shrink-0 text-right">
+                {g.analyzed ? (
+                  <div className="font-mono text-[11px] tabular-nums">
+                    <span className={g.user_color === 'white' ? 'font-semibold text-chesscom-900 dark:text-chesscom-100' : 'text-chesscom-500'}>
+                      {fmtAccuracy(g.accuracy_white)}
+                    </span>
+                    <span className="mx-1 text-chesscom-400">/</span>
+                    <span className={g.user_color === 'black' ? 'font-semibold text-chesscom-900 dark:text-chesscom-100' : 'text-chesscom-500'}>
+                      {fmtAccuracy(g.accuracy_black)}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-[10px] uppercase tracking-wider text-chesscom-400">
+                    {t('home.unreviewed', { defaultValue: 'unreviewed' })}
+                  </span>
+                )}
+              </div>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </motion.section>
+  );
+}
+
+/* ─────────────────────────────────  ATOMS  ─────────────────────────────── */
+
+function Kicker({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-chesscom-500">{children}</div>
+  );
+}
+
+function Title({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mt-0.5 line-clamp-2 text-sm font-semibold text-chesscom-900 dark:text-chesscom-100">{children}</div>
+  );
+}
+
+function Sub({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mt-1 line-clamp-2 text-[11px] text-chesscom-500">{children}</div>
+  );
+}
+
+function Pill({ Icon, tone }: { Icon: React.ElementType; tone: 'gold' | 'board' | 'mistake' | 'muted' }) {
+  const toneCls: Record<typeof tone, string> = {
+    gold: 'bg-gold-500/15 text-gold-600',
+    board: 'bg-board-dark/15 text-board-dark',
+    mistake: 'bg-[color:var(--tw-bg)] text-[color:var(--tw-fg)]', // fallback if used
+    muted: 'bg-chesscom-100 text-chesscom-500 dark:bg-chesscom-700 dark:text-chesscom-300',
+  };
+  // For 'mistake' tone use direct tailwind classes since we have move.mistake palette
+  const cls = tone === 'mistake'
+    ? 'bg-[#ffa459]/15 text-[#ffa459]'
+    : toneCls[tone];
+  return (
+    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${cls}`}>
+      <Icon className="h-4 w-4" />
+    </div>
+  );
+}
+
+function ResultGlyph({ r }: { r: string }) {
+  if (r === 'win') {
+    return (
+      <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-green-500/15 text-[11px] font-bold text-green-500">
+        W
+      </span>
+    );
+  }
+  if (r === 'loss') {
+    return (
+      <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-bad/15 text-[11px] font-bold text-bad">
+        L
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-chesscom-100 text-[11px] font-bold text-chesscom-500 dark:bg-chesscom-700 dark:text-chesscom-300">
+      D
+    </span>
   );
 }
 
 function resolveIcon(name: string): React.ComponentType<{ className?: string }> {
   const lib = Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>;
   return lib[name] ?? lib.Award ?? (() => null);
-}
-
-function ResultIcon({ r }: { r: string }) {
-  if (r === 'win') return <div className="rounded-lg bg-board-dark/15 p-2 text-board-dark"><Trophy className="h-4 w-4" /></div>;
-  if (r === 'loss') return <div className="rounded-lg bg-mistake/15 p-2 text-mistake"><Frown className="h-4 w-4" /></div>;
-  return <div className="rounded-lg bg-chesscom-100 p-2 text-chesscom-500 dark:bg-chesscom-700 dark:text-chesscom-300"><Equal className="h-4 w-4" /></div>;
 }

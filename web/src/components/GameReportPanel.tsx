@@ -110,17 +110,16 @@ export default function GameReportPanel({ gameId, initial, onMomentJump, onGener
     }
   }
 
+  // No outer card / header here — this panel is mounted INSIDE a tab labelled
+  // "AI report" in the analyzer's tab strip. A second header inside is what
+  // gave the page a "analysis within analysis" feel.
   if (!review && !busy) {
     return (
-      <div className="card flex flex-col gap-3 p-4">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-gold-500" />
-          <span className="text-sm font-semibold">{t('review.gameReport', { defaultValue: 'Game Report' })}</span>
-        </div>
+      <div className="flex flex-col gap-3">
         <p className="text-xs text-chesscom-500">{t('review.gameReportDesc', { defaultValue: 'A written breakdown of the game by the AI coach. Highlights phases, key moments, and a skill estimate.' })}</p>
         <button onClick={generate} className="btn-primary w-full text-sm">
           <Sparkles className="h-4 w-4" />
-          {t('review.generateReport', { defaultValue: 'Generate Game Report' })}
+          {t('review.generateReport', { defaultValue: 'Write AI report' })}
         </button>
         {error && <div className="rounded-lg border border-bad/30 bg-bad/10 px-3 py-2 text-xs text-bad">{error}</div>}
       </div>
@@ -131,10 +130,10 @@ export default function GameReportPanel({ gameId, initial, onMomentJump, onGener
     const stepLabel = progress?.step ?? '...';
     const pct = progress ? Math.round((progress.done / Math.max(1, progress.total)) * 100) : 0;
     return (
-      <div className="card flex flex-col gap-3 p-4">
+      <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Loader2 className="h-4 w-4 animate-spin text-gold-500" />
-          <span className="text-sm font-semibold">{t('review.generating', { defaultValue: 'Generating Game Report…' })}</span>
+          <span className="text-sm font-semibold">{t('review.generating', { defaultValue: 'Writing AI report…' })}</span>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-chesscom-100 dark:bg-chesscom-800">
           <div className="h-full bg-gold-500 transition-all duration-200" style={{ width: `${pct}%` }} />
@@ -147,11 +146,7 @@ export default function GameReportPanel({ gameId, initial, onMomentJump, onGener
   if (!review) return null;
 
   return (
-    <div className="card flex flex-col gap-3 overflow-hidden p-4">
-      <div className="flex items-center gap-2">
-        <Sparkles className="h-4 w-4 text-gold-500" />
-        <span className="text-sm font-semibold">{t('review.gameReport', { defaultValue: 'Game Report' })}</span>
-      </div>
+    <div className="flex flex-col gap-3">
       <div
         className="coach-md text-sm text-chesscom-800 dark:text-chesscom-100"
         dangerouslySetInnerHTML={{ __html: renderMarkdown(stripReasoning(review.summary)) }}

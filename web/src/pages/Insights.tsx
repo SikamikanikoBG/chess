@@ -476,14 +476,15 @@ function OpeningRepertoireCard({ data }: { data: OpeningRow[] }) {
         <BookOpen className="h-4 w-4 text-gold-500" />
         <h2 className="text-xs font-semibold uppercase tracking-wider text-chesscom-500">{t('insights.openings', { defaultValue: 'Top openings' })}</h2>
       </div>
-      <table className="w-full text-xs">
+      <div className="overflow-x-auto">
+      <table className="w-full min-w-[28rem] text-xs">
         <thead className="bg-chesscom-50/50 text-[10px] uppercase tracking-wide text-chesscom-500 dark:bg-chesscom-900/40">
           <tr>
             <th className="px-3 py-1.5 text-left">{t('insights.opening', { defaultValue: 'Opening' })}</th>
-            <th className="px-2 py-1.5 text-center" title="As white / as black"><span className="sr-only">side</span>♔/♚</th>
-            <th className="px-2 py-1.5 text-right">{t('insights.played', { defaultValue: 'Games' })}</th>
-            <th className="px-2 py-1.5 text-right">{t('insights.score', { defaultValue: 'Score' })}</th>
-            <th className="px-2 py-1.5 text-right">{t('insights.acc', { defaultValue: 'Acc' })}</th>
+            <th className="whitespace-nowrap px-2 py-1.5 text-center" title="As white / as black"><span className="sr-only">side</span>♔/♚</th>
+            <th className="whitespace-nowrap px-2 py-1.5 text-right">{t('insights.played', { defaultValue: 'Games' })}</th>
+            <th className="whitespace-nowrap px-2 py-1.5 text-right">{t('insights.score', { defaultValue: 'Score' })}</th>
+            <th className="whitespace-nowrap px-2 py-1.5 text-right">{t('insights.acc', { defaultValue: 'Acc' })}</th>
           </tr>
         </thead>
         <tbody>
@@ -505,12 +506,13 @@ function OpeningRepertoireCard({ data }: { data: OpeningRow[] }) {
                   <span className={`font-mono tabular-nums ${tone}`}>{(score * 100).toFixed(0)}%</span>
                   <span className="ml-1 text-[10px] text-chesscom-400">{o.wins}/{o.draws}/{o.losses}</span>
                 </td>
-                <td className="px-2 py-1.5 text-right font-mono tabular-nums">{o.avg_accuracy != null ? `${o.avg_accuracy.toFixed(1)}` : '—'}</td>
+                <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono tabular-nums">{o.avg_accuracy != null ? `${o.avg_accuracy.toFixed(1)}` : '—'}</td>
               </tr>
             );
           })}
         </tbody>
       </table>
+      </div>
     </section>
   );
 }

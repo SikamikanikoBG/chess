@@ -23,9 +23,27 @@ export default function MoveRow({ num, white, black, current, onSelect }: Props)
   const bCur = black?.ply === current;
   const ref = useRef<HTMLDivElement | null>(null);
 
-  // Auto-scroll the current row into view when the user steps with arrow keys.
+  // Keep the current row visible inside the move-list's own scroll container —
+  // but ONLY that container. Native `scrollIntoView` cascades up every
+  // scrollable ancestor, which previously scrolled the right rail and the
+  // page on each step, yanking focus away from the board.
   useEffect(() => {
-    if (wCur || bCur) ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (!(wCur || bCur)) return;
+    const el = ref.current;
+    if (!el) return;
+    let scroller: HTMLElement | null = el.parentElement;
+    while (scroller && scroller !== document.body) {
+      const cs = getComputedStyle(scroller);
+      if (cs.overflowY === 'auto' || cs.overflowY === 'scroll') break;
+      scroller = scroller.parentElement;
+    }
+    if (!scroller || scroller === document.body) return;
+    const elRect = el.getBoundingClientRect();
+    const scRect = scroller.getBoundingClientRect();
+    const fullyVisible = elRect.top >= scRect.top && elRect.bottom <= scRect.bottom;
+    if (fullyVisible) return;
+    const target = scroller.scrollTop + (elRect.top - scRect.top) - scroller.clientHeight / 2 + el.offsetHeight / 2;
+    scroller.scrollTo({ top: target, behavior: 'smooth' });
   }, [wCur, bCur]);
 
   const tint = pickTint(white?.classification, black?.classification);

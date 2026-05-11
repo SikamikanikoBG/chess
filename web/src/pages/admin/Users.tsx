@@ -116,7 +116,7 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
           <input className="input" placeholder={t('common.username')} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} />
           <input className="input" type="password" placeholder={t('common.password')} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
           <input className="input" placeholder={t('common.displayName')} value={form.display_name} onChange={(e) => setForm({ ...form, display_name: e.target.value })} />
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <select className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as never })}>
               <option value="user">{t('admin.roleUser')}</option>
               <option value="admin">{t('admin.roleAdmin')}</option>

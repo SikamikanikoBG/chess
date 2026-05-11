@@ -41,6 +41,12 @@ export interface AnalyzedMove {
   fen_after: string;
   eval_before_cp: number | null;
   eval_after_cp: number | null;
+  // Mate-in-N from white's perspective at the position before / after this
+  // move. Positive = white mates. `null` when the engine has no mate score for
+  // that side of the move. Used by the eval bar / graph to render "M3" badges
+  // instead of having to decode ±10000-cp spikes heuristically.
+  mate_before: number | null;
+  mate_after: number | null;
   best_move_uci: string | null;
   best_move_san: string | null;
   best_pv: string[];
