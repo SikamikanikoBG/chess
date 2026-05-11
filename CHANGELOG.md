@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.4.2] — 2026-05-11
+
+### Fixed
+
+- **EvalBar invisible in Game Analyzer.** The v7.3.0 board layout switched
+  the board element to `w-full` inside a flex row, putting shrink pressure
+  on the eval-bar sibling. EvalBar's flex item had no explicit width and no
+  `flex-shrink: 0`, so it collapsed to ~0 pixels. `alignSelf: 'stretch'`
+  was also on the wrong element (the inner styled div, not the flex item),
+  so even when wide enough it had zero height. Fixed by moving the size +
+  `flex-shrink: 0` + `align-self: stretch` to the outer flex item and
+  letting the inner fill it with `h-full w-full`.
+
 ## [7.4.1] — 2026-05-11
 
 ### Changed — accuracy calibration

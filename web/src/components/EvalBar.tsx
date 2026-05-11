@@ -38,19 +38,21 @@ export default function EvalBar({ cp, mate, orientation = 'white', height }: Pro
   const label = mate != null ? (mate > 0 ? `M${mate}` : `M${-mate}`) : fmtCp(cp);
   const isMate = mate != null;
 
-  // 18px wide, matches chess.com.
+  // 18px wide, matches chess.com. flexShrink:0 keeps the bar from being
+  // squeezed when the sibling board uses w-full inside a flex row; alignSelf
+  // belongs on the flex item itself (the outer relative div), not on the
+  // inner styled div where it has no effect.
   const wrapStyle: React.CSSProperties = height != null
-    ? { height, width: 18 }
-    : { width: 18, alignSelf: 'stretch' };
+    ? { height, width: 18, flexShrink: 0 }
+    : { width: 18, flexShrink: 0, alignSelf: 'stretch' };
 
   // Smooth tween instead of spring — chess.com's bar feels glide-y, not bouncy.
   const ease = [0.22, 1, 0.36, 1] as const;
 
   return (
-    <div className="relative">
+    <div className="relative" style={wrapStyle}>
       <div
-        className={`relative flex flex-col overflow-hidden rounded-l-md border border-chesscom-300 bg-chesscom-200 shadow-soft dark:border-chesscom-700 ${isMate ? 'shadow-glow' : ''}`}
-        style={wrapStyle}
+        className={`relative flex h-full w-full flex-col overflow-hidden rounded-l-md border border-chesscom-300 bg-chesscom-200 shadow-soft dark:border-chesscom-700 ${isMate ? 'shadow-glow' : ''}`}
       >
         <motion.div
           className={`flex items-start justify-center text-[9px] font-semibold tabular-nums text-white/90 ${
