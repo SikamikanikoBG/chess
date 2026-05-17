@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
+  "name": "Patzer",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:20-bookworm",
+  "onCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends stockfish && sudo rm -rf /var/lib/apt/lists/* && npm install",
+  "postAttachCommand": "npm run dev",
+  "forwardPorts": [5173, 8800],
+  "portsAttributes": {
+    "5173": {
+      "label": "Patzer (Vite dev — open this)",
+      "onAutoForward": "openPreview"
+    },
+    "8800": {
+      "label": "Patzer API server",
+      "onAutoForward": "silent"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode"
+      ],
+      "settings": {
+        "editor.formatOnSave": false,
+        "typescript.tsdk": "node_modules/typescript/lib"
+      }
+    }
+  },
+  "remoteUser": "node",
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "4gb"
+  }
+}

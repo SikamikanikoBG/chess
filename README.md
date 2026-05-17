@@ -37,7 +37,13 @@ Patzer is a tiny, self-hosted take on the Chess.com / Lichess workflow you actua
 
 ## First run in five minutes
 
-Pick **one** of these. Either way, open <http://localhost:8800> when it's up; the first visit walks you through a setup wizard.
+Pick **one** of these. The Docker options open <http://localhost:8800>; the Codespaces option opens in your browser. Either way, the first visit walks you through a setup wizard.
+
+**Try it in your browser**
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/SikamikanikoBG/patzer?quickstart=1)
+
+Spins up a temporary Codespace with Patzer + Stockfish pre-installed. Wait ~60 seconds for `npm install` + dev server to start, then click the forwarded port labelled *"Patzer (Vite dev — open this)"*. You get the full app **except** the AI Coach narration (which needs an Ollama host on your network — see below).
 
 **`docker run`**
 
