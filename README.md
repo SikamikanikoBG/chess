@@ -10,6 +10,12 @@
 </p>
 
 <p align="center">
+  <a href="https://codespaces.new/SikamikanikoBG/patzer?quickstart=1">
+    <img src="https://github.com/codespaces/badge.svg" alt="Open in GitHub Codespaces" height="32"/>
+  </a>
+</p>
+
+<p align="center">
   <a href="https://github.com/SikamikanikoBG/patzer/releases"><img src="https://img.shields.io/github/v/release/SikamikanikoBG/patzer?style=flat-square" alt="release"/></a>
   <a href="https://github.com/SikamikanikoBG/patzer/pkgs/container/patzer"><img src="https://img.shields.io/badge/ghcr.io-patzer-2496ed?style=flat-square&logo=docker&logoColor=white" alt="GHCR"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/SikamikanikoBG/patzer?style=flat-square" alt="MIT"/></a>
