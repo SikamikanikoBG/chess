@@ -32,5 +32,8 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
+# Local launch prep (drafts, OG SVG, video script, GFI bodies) — not user-facing
+docs/launch/
+
 # Test coverage
 coverage/
